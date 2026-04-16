@@ -55,10 +55,88 @@ final class AudioManager: ObservableObject {
     private var _bpmFromMetadata = false
     private var isScheduling = false
 
+    /// 현재 로드된 파일의 security-scoped URL.
+    /// 트랙 수명 동안 권한을 유지하고, 새 파일 로드 또는 해제 시 반납한다.
+    private var currentAccessedURL: URL?
+
     // MARK: - Init
 
     init() {
+        setupAudioSession()
         setupEngine()
+        observeInterruptions()
+        observeRouteChanges()
+    }
+
+    deinit {
+        releaseCurrentURL()
+    }
+
+    // MARK: - Audio Session (SPEC.md 1.1~1.4)
+
+    private func setupAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true)
+        } catch {
+            logger.error("[A-01] Audio session setup failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// SPEC.md 1.3: 인터럽트 처리
+    private func observeInterruptions() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            guard let info = notification.userInfo,
+                  let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+            Task { @MainActor in
+                switch type {
+                case .began:
+                    if self.state == .playing {
+                        self.playerNode.pause()
+                        self.state = .paused
+                        logger.info("Interruption began, paused playback")
+                    }
+                case .ended:
+                    let options = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                    if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) {
+                        self.play()
+                        logger.info("Interruption ended, auto-resumed")
+                    } else {
+                        logger.info("Interruption ended, waiting for manual resume")
+                    }
+                @unknown default:
+                    break
+                }
+            }
+        }
+    }
+
+    /// SPEC.md 1.4: 오디오 라우트 변경 처리 (헤드폰 언플러그 등)
+    private func observeRouteChanges() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            guard let info = notification.userInfo,
+                  let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+            Task { @MainActor in
+                if reason == .oldDeviceUnavailable, self.state == .playing {
+                    self.playerNode.pause()
+                    self.state = .paused
+                    logger.info("Headphone/BT disconnected, paused playback")
+                }
+            }
+        }
     }
 
     // MARK: - Engine Setup
@@ -74,17 +152,41 @@ final class AudioManager: ObservableObject {
         timePitch.pitch = 0 // 피치 유지 (key lock)
     }
 
+    // MARK: - Security-Scoped URL Management
+
+    /// 이전 파일의 security-scoped 권한을 반납한다.
+    private func releaseCurrentURL() {
+        if let url = currentAccessedURL {
+            url.stopAccessingSecurityScopedResource()
+            currentAccessedURL = nil
+        }
+    }
+
     // MARK: - File Loading
 
     func loadFile(url: URL) async {
+        // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
+        playerNode.stop()
+        playerNode.reset()
+        isScheduling = false
+        if engine.isRunning {
+            engine.stop()
+        }
+
+        // 이전 파일의 security-scoped 권한 반납
+        releaseCurrentURL()
+
         state = .loading
         errorMessage = nil
         trackTitle = nil
         trackArtist = nil
         _bpmFromMetadata = false
 
-        // Security-scoped resource access
+        // [P1 fix] 새 파일의 security-scoped 권한 획득 → 트랙 수명 동안 유지
         let accessing = url.startAccessingSecurityScopedResource()
+        if accessing {
+            currentAccessedURL = url
+        }
 
         do {
             let file = try AVAudioFile(forReading: url)
@@ -118,11 +220,9 @@ final class AudioManager: ObservableObject {
         } catch {
             state = .error
             errorMessage = "파일을 열 수 없습니다"
+            // 로드 실패 시 권한도 반납
+            releaseCurrentURL()
             logger.error("[F-01] File load failed: \(error.localizedDescription)")
-        }
-
-        if accessing {
-            url.stopAccessingSecurityScopedResource()
         }
     }
 
