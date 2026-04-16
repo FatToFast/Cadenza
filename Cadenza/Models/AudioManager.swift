@@ -69,7 +69,8 @@ final class AudioManager: ObservableObject {
     }
 
     deinit {
-        releaseCurrentURL()
+        // deinit은 nonisolated이므로 security-scoped URL을 직접 해제
+        currentAccessedURL?.stopAccessingSecurityScopedResource()
     }
 
     // MARK: - Audio Session (SPEC.md 1.1~1.4)
@@ -90,12 +91,18 @@ final class AudioManager: ObservableObject {
             forName: AVAudioSession.interruptionNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
-            guard let self else { return }
+            // Extract all values from userInfo BEFORE entering the Task
+            // to avoid sending non-Sendable dictionary across isolation boundary
             guard let info = notification.userInfo,
                   let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+            let shouldResume: Bool = {
+                let options = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                return AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
+            }()
 
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 switch type {
                 case .began:
                     if self.state == .playing {
@@ -104,8 +111,7 @@ final class AudioManager: ObservableObject {
                         logger.info("Interruption began, paused playback")
                     }
                 case .ended:
-                    let options = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-                    if AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume) {
+                    if shouldResume {
                         self.play()
                         logger.info("Interruption ended, auto-resumed")
                     } else {
@@ -124,12 +130,12 @@ final class AudioManager: ObservableObject {
             forName: AVAudioSession.routeChangeNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
-            guard let self else { return }
             guard let info = notification.userInfo,
                   let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
                   let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 if reason == .oldDeviceUnavailable, self.state == .playing {
                     self.playerNode.pause()
                     self.state = .paused

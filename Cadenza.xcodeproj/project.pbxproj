@@ -180,7 +180,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cadenza.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenza;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -201,7 +201,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cadenza.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenza;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				TARGETED_DEVICE_FAMILY = "1,2";

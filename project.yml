@@ -21,7 +21,7 @@ targets:
       base:
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        PRODUCT_BUNDLE_IDENTIFIER: com.cadenza.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.jy.cadenza
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: true
