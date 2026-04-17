@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		24B655F7C0EAC5D3A8A5FAAB /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */; };
 		5AF06C82DDB469D193EBFC93 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32E8307CA39DD324E6A03F0 /* AudioManager.swift */; };
 		78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */; };
 		7CCD087ADED37595EFD55A1F /* BPMDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */; };
@@ -17,6 +18,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = "Kickdrum Rocket-2.mp3"; sourceTree = "<group>"; };
 		3F8FFC774733449AD9A28B63 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		498EA72F6CA1930D69CB9A0B /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMDisplayView.swift; sourceTree = "<group>"; };
@@ -76,6 +78,7 @@
 		915C908E1661614A51514CAB /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -105,6 +108,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F6790ED2D913E5D732C38092 /* Build configuration list for PBXNativeTarget "Cadenza" */;
 			buildPhases = (
+				6B4F7A8E11A44D35C515B71A /* Resources */,
 				06AC62204230D79917D49F6B /* Sources */,
 			);
 			buildRules = (
@@ -148,6 +152,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		6B4F7A8E11A44D35C515B71A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				24B655F7C0EAC5D3A8A5FAAB /* Kickdrum Rocket-2.mp3 in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		06AC62204230D79917D49F6B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -170,7 +185,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -182,6 +197,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenza;
 				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -191,7 +207,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -203,6 +219,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenza;
 				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

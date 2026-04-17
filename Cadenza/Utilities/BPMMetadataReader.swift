@@ -14,14 +14,20 @@ enum BPMMetadataReader {
         }
 
         // ID3 TBPM (MP3)
-        if let bpm = extractBPM(from: metadata, key: AVMetadataKey.id3MetadataKeyBeatsPerMinute,
-                                keySpace: .id3) {
+        if let bpm = await extractBPM(
+            from: metadata,
+            key: AVMetadataKey.id3MetadataKeyBeatsPerMinute,
+            keySpace: .id3
+        ) {
             return bpm
         }
 
         // iTunes/M4A tempo
-        if let bpm = extractBPM(from: metadata, key: AVMetadataKey.iTunesMetadataKeyBeatsPerMin,
-                                keySpace: .iTunes) {
+        if let bpm = await extractBPM(
+            from: metadata,
+            key: AVMetadataKey.iTunesMetadataKeyBeatsPerMin,
+            keySpace: .iTunes
+        ) {
             return bpm
         }
 
@@ -37,9 +43,11 @@ enum BPMMetadataReader {
         return nil
     }
 
-    private static func extractBPM(from metadata: [AVMetadataItem],
-                                   key: AVMetadataKey,
-                                   keySpace: AVMetadataKeySpace) -> Double? {
+    private static func extractBPM(
+        from metadata: [AVMetadataItem],
+        key: AVMetadataKey,
+        keySpace: AVMetadataKeySpace
+    ) async -> Double? {
         let items = AVMetadataItem.metadataItems(from: metadata,
                                                   withKey: key,
                                                   keySpace: keySpace)
@@ -47,9 +55,10 @@ enum BPMMetadataReader {
 
         var bpm: Double?
 
-        if let number = item.numberValue {
+        if let number = try? await item.load(.numberValue) {
             bpm = number.doubleValue
-        } else if let string = item.stringValue, let parsed = Double(string) {
+        } else if let string = try? await item.load(.stringValue),
+                  let parsed = Double(string) {
             bpm = parsed
         }
 

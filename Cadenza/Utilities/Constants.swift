@@ -3,14 +3,20 @@ import SwiftUI
 // MARK: - BPM Ranges
 
 enum BPMRange {
-    static let targetMin: Double = 140
-    static let targetMax: Double = 200
-    static let targetDefault: Double = 170
+    static let targetMin: Double = 160
+    static let targetMax: Double = 220
+    static let targetDefault: Double = 180
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
     static let rateMin: Float = 0.5
     static let rateMax: Float = 2.5
+}
+
+enum MetronomeDefaults {
+    static let enabled = true
+    static let volume: Float = 0.6
+    static let beatsPerBar = 4
 }
 
 // MARK: - Colors (DESIGN.md 4.2)

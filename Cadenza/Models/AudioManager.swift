@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import Foundation
 import os
 
 private let logger = Logger(subsystem: "com.cadenza.app", category: "AudioManager")
@@ -13,6 +14,91 @@ enum PlaybackState: String {
     case playing
     case paused
     case error
+}
+
+enum OriginalBPMSource: Equatable {
+    case metadata
+    case assumedDefault
+    case manual
+
+    var badgeText: String {
+        switch self {
+        case .metadata:
+            return "자동 감지"
+        case .assumedDefault:
+            return "확인 필요"
+        case .manual:
+            return "직접 입력"
+        }
+    }
+
+    var helperText: String {
+        switch self {
+        case .metadata:
+            return "파일 메타데이터에서 BPM을 읽었습니다. 필요하면 직접 수정할 수 있습니다."
+        case .assumedDefault:
+            return "메타데이터가 없어 120 BPM으로 가정했습니다. 정확한 속도를 위해 직접 입력하세요."
+        case .manual:
+            return "직접 입력한 BPM을 기준으로 재생 속도를 계산합니다."
+        }
+    }
+}
+
+enum SampleTrackPreset: String, CaseIterable, Identifiable {
+    case clickLoop
+    case synthPulse
+    case warmupGroove
+    case kickdrumRocket
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .clickLoop:
+            return "클릭 루프"
+        case .synthPulse:
+            return "신스 펄스"
+        case .warmupGroove:
+            return "워밍업 그루브"
+        case .kickdrumRocket:
+            return "Kickdrum"
+        }
+    }
+
+    var artist: String {
+        switch self {
+        case .kickdrumRocket:
+            return "Bundled MP3"
+        default:
+            return "Built-in Sample"
+        }
+    }
+
+    var bpm: Double {
+        switch self {
+        case .clickLoop:
+            return 120
+        case .synthPulse:
+            return 160
+        case .warmupGroove:
+            return 180
+        case .kickdrumRocket:
+            return 180
+        }
+    }
+
+    var filename: String {
+        switch self {
+        case .kickdrumRocket:
+            return "Kickdrum Rocket-2.mp3"
+        default:
+            return "Cadenza-\(rawValue).wav"
+        }
+    }
+
+    var isBundledFile: Bool {
+        self == .kickdrumRocket
+    }
 }
 
 // MARK: - AudioManager
@@ -31,12 +117,24 @@ final class AudioManager: ObservableObject {
 
     @Published private(set) var state: PlaybackState = .idle
     @Published var targetBPM: Double = BPMRange.targetDefault {
-        didSet { updateRate() }
+        didSet {
+            updateRate()
+            restartMetronomeIfNeeded()
+        }
     }
     @Published private(set) var originalBPM: Double = BPMRange.originalDefault
+    @Published private(set) var originalBPMSource: OriginalBPMSource = .assumedDefault
     @Published private(set) var trackTitle: String?
     @Published private(set) var trackArtist: String?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var currentPlaybackTime: TimeInterval = 0
+    @Published private(set) var trackDuration: TimeInterval = 0
+    @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
+        didSet { handleMetronomeEnabledChange() }
+    }
+    @Published var metronomeVolume: Float = MetronomeDefaults.volume {
+        didSet { metronomeNode.volume = metronomeVolume }
+    }
 
     var playbackRate: Double {
         guard originalBPM > 0 else { return 1.0 }
@@ -45,24 +143,51 @@ final class AudioManager: ObservableObject {
     }
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
+    var hasLoadedTrack: Bool { audioFile != nil }
+    var canStartPlayback: Bool { audioFile != nil || metronomeEnabled }
+    var needsOriginalBPMInput: Bool { audioFile != nil && originalBPMSource == .assumedDefault }
+    var playbackProgress: Double {
+        guard trackDuration > 0 else { return 0 }
+        return min(max(currentPlaybackTime / trackDuration, 0), 1)
+    }
+    var isMetronomeOnlyMode: Bool {
+        audioFile == nil && (state == .playing || state == .paused) && metronomeEnabled
+    }
 
     // MARK: - Private
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
+    private let metronomeNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
     private var audioFile: AVAudioFile?
     private var _bpmFromMetadata = false
+    private var hasScheduledPlayback = false
     private var isScheduling = false
+    private var scheduledLoopStartFrame: AVAudioFramePosition = 0
+    private var currentScheduledStartFrame: AVAudioFramePosition = 0
+    private var metronomeBeatIndex = 0
+    private var metronomeScheduledBeats = 0
+    private var isMetronomeRunning = false
+    private let metronomeLookaheadBeats = 4
+    private let metronomeFormat: AVAudioFormat = {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1) else {
+            fatalError("[M-01] Standard mono 44.1kHz format unavailable on this device")
+        }
+        return format
+    }()
+    private var accentBeatBuffer: AVAudioPCMBuffer?
+    private var regularBeatBuffer: AVAudioPCMBuffer?
 
     /// 현재 로드된 파일의 security-scoped URL.
     /// 트랙 수명 동안 권한을 유지하고, 새 파일 로드 또는 해제 시 반납한다.
     private var currentAccessedURL: URL?
+    private var isAudioSessionConfigured = false
+    private var progressTimer: Timer?
 
     // MARK: - Init
 
     init() {
-        setupAudioSession()
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
@@ -75,14 +200,17 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Audio Session (SPEC.md 1.1~1.4)
 
-    private func setupAudioSession() {
+    private func configureAudioSessionIfNeeded() throws {
+        guard !isAudioSessionConfigured else { return }
         let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
-        } catch {
-            logger.error("[A-01] Audio session setup failed: \(error.localizedDescription)")
-        }
+        try session.setCategory(.playback, mode: .default, options: [])
+        isAudioSessionConfigured = true
+    }
+
+    private func activateAudioSessionIfNeeded() throws {
+        try configureAudioSessionIfNeeded()
+        let session = AVAudioSession.sharedInstance()
+        try session.setActive(true)
     }
 
     /// SPEC.md 1.3: 인터럽트 처리
@@ -107,6 +235,7 @@ final class AudioManager: ObservableObject {
                 case .began:
                     if self.state == .playing {
                         self.playerNode.pause()
+                        self.stopMetronome()
                         self.state = .paused
                         logger.info("Interruption began, paused playback")
                     }
@@ -138,6 +267,7 @@ final class AudioManager: ObservableObject {
                 guard let self else { return }
                 if reason == .oldDeviceUnavailable, self.state == .playing {
                     self.playerNode.pause()
+                    self.stopMetronome()
                     self.state = .paused
                     logger.info("Headphone/BT disconnected, paused playback")
                 }
@@ -150,12 +280,15 @@ final class AudioManager: ObservableObject {
     /// Attach nodes BEFORE connecting them (SPEC.md 주의사항)
     private func setupEngine() {
         engine.attach(playerNode)
+        engine.attach(metronomeNode)
         engine.attach(timePitch)
 
         engine.connect(playerNode, to: timePitch, format: nil)
+        engine.connect(metronomeNode, to: engine.mainMixerNode, format: metronomeFormat)
         engine.connect(timePitch, to: engine.mainMixerNode, format: nil)
 
         timePitch.pitch = 0 // 피치 유지 (key lock)
+        metronomeNode.volume = metronomeVolume
     }
 
     // MARK: - Security-Scoped URL Management
@@ -174,7 +307,11 @@ final class AudioManager: ObservableObject {
         // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
         playerNode.stop()
         playerNode.reset()
+        hasScheduledPlayback = false
         isScheduling = false
+        scheduledLoopStartFrame = 0
+        currentScheduledStartFrame = 0
+        stopProgressUpdates()
         if engine.isRunning {
             engine.stop()
         }
@@ -184,6 +321,11 @@ final class AudioManager: ObservableObject {
 
         state = .loading
         errorMessage = nil
+        audioFile = nil
+        originalBPM = BPMRange.originalDefault
+        originalBPMSource = .assumedDefault
+        currentPlaybackTime = 0
+        trackDuration = 0
         trackTitle = nil
         trackArtist = nil
         _bpmFromMetadata = false
@@ -197,13 +339,19 @@ final class AudioManager: ObservableObject {
         do {
             let file = try AVAudioFile(forReading: url)
             self.audioFile = file
+            trackDuration = Double(file.length) / file.processingFormat.sampleRate
 
             // 트랙 메타데이터 읽기
             let asset = AVAsset(url: url)
             if let metadata = try? await asset.load(.metadata) {
-                trackTitle = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .commonIdentifierTitle).first?.stringValue
-                    ?? url.deletingPathExtension().lastPathComponent
-                trackArtist = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .commonIdentifierArtist).first?.stringValue
+                trackTitle = await Self.loadMetadataString(
+                    from: metadata,
+                    identifier: .commonIdentifierTitle
+                ) ?? url.deletingPathExtension().lastPathComponent
+                trackArtist = await Self.loadMetadataString(
+                    from: metadata,
+                    identifier: .commonIdentifierArtist
+                )
             } else {
                 trackTitle = url.deletingPathExtension().lastPathComponent
             }
@@ -212,10 +360,12 @@ final class AudioManager: ObservableObject {
             if let bpm = await BPMMetadataReader.readBPM(from: url) {
                 originalBPM = bpm
                 _bpmFromMetadata = true
+                originalBPMSource = .metadata
                 logger.info("[track_loaded] BPM from metadata: \(bpm)")
             } else {
                 originalBPM = BPMRange.originalDefault
                 _bpmFromMetadata = false
+                originalBPMSource = .assumedDefault
                 logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
             }
 
@@ -224,43 +374,91 @@ final class AudioManager: ObservableObject {
             logger.info("[track_loaded] \(url.lastPathComponent) loaded successfully")
 
         } catch {
+            audioFile = nil
+            originalBPM = BPMRange.originalDefault
+            originalBPMSource = .assumedDefault
             state = .error
-            errorMessage = "파일을 열 수 없습니다"
+            errorMessage = Self.userFacingLoadError(for: url)
             // 로드 실패 시 권한도 반납
             releaseCurrentURL()
             logger.error("[F-01] File load failed: \(error.localizedDescription)")
         }
     }
 
+    func loadSampleTrack(_ preset: SampleTrackPreset = .clickLoop) async {
+        do {
+            let sampleURL: URL
+            if preset.isBundledFile {
+                sampleURL = try Self.bundledSampleURL(for: preset)
+            } else {
+                // 파일 합성은 디스크 I/O를 포함하므로 메인 액터를 벗어나 수행한다.
+                sampleURL = try await Task.detached(priority: .userInitiated) {
+                    try Self.sampleAudioURL(for: preset)
+                }.value
+            }
+
+            await loadFile(url: sampleURL)
+
+            if state == .ready {
+                trackTitle = preset.title
+                trackArtist = preset.artist
+                if !hasBPMFromMetadata {
+                    originalBPM = preset.bpm
+                    _bpmFromMetadata = false
+                    originalBPMSource = .manual
+                    updateRate()
+                }
+            }
+        } catch {
+            state = .error
+            errorMessage = "샘플 오디오를 준비할 수 없습니다"
+            logger.error("[F-02] Sample audio creation failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Playback Control
 
     func play() {
-        guard state == .ready || state == .paused else { return }
-        guard audioFile != nil else { return }
+        let canResumeTrack = state == .ready || state == .paused
+        let canStartMetronomeOnly = state == .idle && audioFile == nil && metronomeEnabled
+        guard canResumeTrack || canStartMetronomeOnly else { return }
+        guard canStartPlayback else { return }
 
         do {
+            try activateAudioSessionIfNeeded()
             if !engine.isRunning {
                 try engine.start()
             }
 
-            if state == .ready {
+            if audioFile != nil, !hasScheduledPlayback {
                 scheduleLoop()
             }
 
-            playerNode.play()
+            if audioFile != nil {
+                playerNode.play()
+                startProgressUpdates()
+            }
+            if metronomeEnabled {
+                startMetronome()
+            }
             state = .playing
-            logger.info("[run_started] targetBPM=\(self.targetBPM) originalBPM=\(self.originalBPM)")
+            logger.info("[run_started] targetBPM=\(self.targetBPM) hasFile=\(self.audioFile != nil) metronomeOn=\(self.metronomeEnabled)")
 
         } catch {
             state = .error
             errorMessage = "오디오 재생을 시작할 수 없습니다"
-            logger.error("[A-01] Engine start failed: \(error.localizedDescription)")
+            logger.error("[A-01] Playback start failed: \(error.localizedDescription)")
         }
     }
 
     func pause() {
         guard state == .playing else { return }
-        playerNode.pause()
+        if audioFile != nil {
+            playerNode.pause()
+        }
+        updateCurrentPlaybackTime()
+        stopProgressUpdates()
+        stopMetronome()
         state = .paused
     }
 
@@ -282,17 +480,34 @@ final class AudioManager: ObservableObject {
     private func scheduleLoop() {
         guard let file = audioFile else { return }
         guard !isScheduling else { return }
-        isScheduling = true
+        let totalFrames = file.length
+        guard totalFrames > 0 else { return }
 
-        // 파일 처음부터 스케줄
-        file.framePosition = 0
-        playerNode.scheduleFile(file, at: nil) { [weak self] in
+        let startFrame = min(max(scheduledLoopStartFrame, 0), max(totalFrames - 1, 0))
+        let framesRemaining = totalFrames - startFrame
+        guard framesRemaining > 0 else { return }
+
+        isScheduling = true
+        hasScheduledPlayback = true
+        currentScheduledStartFrame = startFrame
+        scheduledLoopStartFrame = 0
+
+        playerNode.scheduleSegment(
+            file,
+            startingFrame: startFrame,
+            frameCount: AVAudioFrameCount(framesRemaining),
+            at: nil
+        ) { [weak self] in
             Task { @MainActor in
                 guard let self, self.state == .playing else {
                     self?.isScheduling = false
+                    self?.hasScheduledPlayback = false
                     return
                 }
+                self.currentPlaybackTime = 0
                 self.isScheduling = false
+                self.hasScheduledPlayback = false
+                self.currentScheduledStartFrame = 0
                 self.scheduleLoop()
                 logger.debug("Loop: re-scheduled from completion handler")
             }
@@ -303,10 +518,58 @@ final class AudioManager: ObservableObject {
 
     func setOriginalBPM(_ bpm: Double) {
         // SPEC.md 2.8: 30~300 범위만 허용
-        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
+        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+            errorMessage = "원본 BPM은 30~300 사이 숫자로 입력하세요"
+            return
+        }
         originalBPM = bpm
         _bpmFromMetadata = false
+        originalBPMSource = .manual
+        errorMessage = nil
         updateRate()
+    }
+
+    func nudgeTargetBPM(by delta: Double) {
+        let next = min(max(targetBPM + delta, BPMRange.targetMin), BPMRange.targetMax)
+        targetBPM = next.rounded()
+    }
+
+    func resetTargetBPM() {
+        targetBPM = BPMRange.targetDefault
+    }
+
+    func seek(toProgress progress: Double) {
+        guard let file = audioFile else { return }
+
+        let wasPlaying = state == .playing
+        let clampedProgress = min(max(progress, 0), 1)
+        let maxFrame = max(file.length - 1, 0)
+        let targetFrame = min(AVAudioFramePosition((Double(file.length) * clampedProgress).rounded(.down)), maxFrame)
+
+        playerNode.stop()
+        playerNode.reset()
+        hasScheduledPlayback = false
+        isScheduling = false
+        scheduledLoopStartFrame = targetFrame
+        currentScheduledStartFrame = targetFrame
+        currentPlaybackTime = Double(targetFrame) / file.processingFormat.sampleRate
+
+        scheduleLoop()
+
+        if wasPlaying {
+            playerNode.play()
+            startProgressUpdates()
+        } else {
+            stopProgressUpdates()
+        }
+    }
+
+    func clearError() {
+        errorMessage = nil
+    }
+
+    func presentError(_ message: String) {
+        errorMessage = message
     }
 
     private func updateRate() {
@@ -318,5 +581,304 @@ final class AudioManager: ObservableObject {
         }
         let rate = Float(playbackRate)
         timePitch.rate = rate
+    }
+
+    private func handleMetronomeEnabledChange() {
+        logger.info("[metronome_toggled] isOn=\(self.metronomeEnabled, privacy: .public) currentVolume=\(self.metronomeVolume)")
+
+        if metronomeEnabled {
+            if state == .playing {
+                startMetronome()
+            }
+            return
+        }
+
+        stopMetronome()
+
+        // 메트로놈-only 모드에서 끄면 세션 종료. 엔진도 멈춰 배터리/세션을 반납한다.
+        if audioFile == nil, state == .playing || state == .paused {
+            if engine.isRunning {
+                engine.stop()
+            }
+            state = .idle
+        }
+    }
+
+    private func restartMetronomeIfNeeded() {
+        guard isMetronomeRunning, metronomeEnabled else { return }
+        startMetronome()
+    }
+
+    private func startMetronome() {
+        guard metronomeEnabled else { return }
+
+        stopMetronome()
+        metronomeBeatIndex = 0
+        metronomeScheduledBeats = 0
+        isMetronomeRunning = true
+        rebuildMetronomeBuffers()
+        scheduleMetronomeBeatsIfNeeded()
+        metronomeNode.play()
+    }
+
+    private func stopMetronome() {
+        metronomeNode.stop()
+        metronomeNode.reset()
+        metronomeBeatIndex = 0
+        metronomeScheduledBeats = 0
+        isMetronomeRunning = false
+    }
+
+    private func scheduleMetronomeBeatsIfNeeded() {
+        guard isMetronomeRunning, metronomeEnabled else { return }
+        while metronomeScheduledBeats < metronomeLookaheadBeats {
+            scheduleNextMetronomeBeat()
+        }
+    }
+
+    private func scheduleNextMetronomeBeat() {
+        let beat = metronomeBeatIndex
+        let isDownbeat = beat.isMultiple(of: MetronomeDefaults.beatsPerBar)
+        guard let buffer = isDownbeat ? accentBeatBuffer : regularBeatBuffer else {
+            logger.error("[M-02] Metronome buffer unavailable, stopping metronome")
+            stopMetronome()
+            return
+        }
+
+        // 한 박 길이의 버퍼를 큐에 이어 붙여 메인 런루프와 분리된 샘플 정확도로 재생한다.
+        metronomeNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.metronomeScheduledBeats = max(0, self.metronomeScheduledBeats - 1)
+                guard self.isMetronomeRunning else { return }
+                self.scheduleMetronomeBeatsIfNeeded()
+            }
+        }
+
+        metronomeScheduledBeats += 1
+        metronomeBeatIndex = (beat + 1) % MetronomeDefaults.beatsPerBar
+    }
+
+    private func rebuildMetronomeBuffers() {
+        let beatDuration = 60.0 / targetBPM
+        accentBeatBuffer = Self.makeMetronomeBeatBuffer(
+            format: metronomeFormat,
+            frequency: 1_320,
+            gain: 0.95,
+            beatDuration: beatDuration
+        )
+        regularBeatBuffer = Self.makeMetronomeBeatBuffer(
+            format: metronomeFormat,
+            frequency: 880,
+            gain: 0.72,
+            beatDuration: beatDuration
+        )
+    }
+
+    private func startProgressUpdates() {
+        stopProgressUpdates()
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateCurrentPlaybackTime()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
+        updateCurrentPlaybackTime()
+    }
+
+    private func stopProgressUpdates() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    private func updateCurrentPlaybackTime() {
+        guard let file = audioFile,
+              let nodeTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+            if state != .playing {
+                currentPlaybackTime = min(currentPlaybackTime, trackDuration)
+            }
+            return
+        }
+
+        let currentFrame = currentScheduledStartFrame + AVAudioFramePosition(playerTime.sampleTime)
+        let seconds = Double(currentFrame) / playerTime.sampleRate
+        let duration = Double(file.length) / file.processingFormat.sampleRate
+        currentPlaybackTime = min(max(seconds, 0), duration)
+    }
+
+    private static func bundledSampleURL(for preset: SampleTrackPreset) throws -> URL {
+        let filename = preset.filename
+        let resourceName = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        guard let url = Bundle.main.url(forResource: resourceName, withExtension: ext) else {
+            throw NSError(
+                domain: "AudioManager",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Bundled sample not found: \(filename)"]
+            )
+        }
+        return url
+    }
+
+    nonisolated private static func sampleAudioURL(for preset: SampleTrackPreset) throws -> URL {
+        // Caches 디렉터리를 사용해 앱 재실행 간 재사용하되, 시스템이 공간 회수 시 폐기될 수 있음을 허용.
+        let fileManager = FileManager.default
+        let cachesDir = try fileManager.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let url = cachesDir.appendingPathComponent(preset.filename)
+
+        if !fileManager.fileExists(atPath: url.path) {
+            try Self.createSampleAudioFile(at: url, preset: preset)
+        }
+
+        return url
+    }
+
+    nonisolated private static func createSampleAudioFile(at url: URL, preset: SampleTrackPreset) throws {
+        let sampleRate = 44_100
+        let channels = 1
+        let bitsPerSample = 16
+        let bytesPerSample = bitsPerSample / 8
+        let beatCount = 8
+        let bpm = preset.bpm
+        let beatDuration = 60.0 / bpm
+        let duration = Double(beatCount) * beatDuration
+        let frameCount = Int(Double(sampleRate) * duration)
+        let dataSize = frameCount * channels * bytesPerSample
+
+        var wav = Data()
+        wav.reserveCapacity(44 + dataSize)
+
+        wav.append("RIFF".data(using: .ascii)!)
+        wav.appendLE32(UInt32(36 + dataSize))
+        wav.append("WAVE".data(using: .ascii)!)
+        wav.append("fmt ".data(using: .ascii)!)
+        wav.appendLE32(16)
+        wav.appendLE16(1)
+        wav.appendLE16(UInt16(channels))
+        wav.appendLE32(UInt32(sampleRate))
+        wav.appendLE32(UInt32(sampleRate * channels * bytesPerSample))
+        wav.appendLE16(UInt16(channels * bytesPerSample))
+        wav.appendLE16(UInt16(bitsPerSample))
+        wav.append("data".data(using: .ascii)!)
+        wav.appendLE32(UInt32(dataSize))
+
+        for frame in 0..<frameCount {
+            let time = Double(frame) / Double(sampleRate)
+            let beatIndex = Int(time / beatDuration)
+            let beatStart = Double(beatIndex) * beatDuration
+            let beatOffset = time - beatStart
+
+            let sampleValue: Double
+            switch preset {
+            case .clickLoop:
+                if beatOffset < 0.08 {
+                    let envelope = exp(-beatOffset * 28)
+                    let accentBoost = beatIndex.isMultiple(of: 4) ? 1.0 : 0.72
+                    let baseTone = sin(2 * .pi * 880 * beatOffset)
+                    let overtone = 0.45 * sin(2 * .pi * 1760 * beatOffset)
+                    sampleValue = (baseTone + overtone) * envelope * 0.55 * accentBoost
+                } else {
+                    sampleValue = 0
+                }
+            case .synthPulse:
+                let phase = beatOffset / beatDuration
+                let synthEnvelope = exp(-beatOffset * 6.5)
+                let pulse = sin(2 * .pi * 220 * time) + 0.35 * sin(2 * .pi * 440 * time)
+                let gate = phase < 0.42 ? 1.0 : 0.0
+                sampleValue = pulse * synthEnvelope * gate * 0.33
+            case .warmupGroove:
+                let eighthDuration = beatDuration / 2
+                let eighthIndex = Int(beatOffset / eighthDuration)
+                let localOffset = beatOffset.truncatingRemainder(dividingBy: eighthDuration)
+                let hitGain = (eighthIndex == 0 || beatIndex.isMultiple(of: 4)) ? 1.0 : 0.58
+                if localOffset < 0.07 {
+                    let envelope = exp(-localOffset * 18)
+                    let low = sin(2 * .pi * 110 * localOffset)
+                    let mid = 0.6 * sin(2 * .pi * 330 * localOffset)
+                    sampleValue = (low + mid) * envelope * hitGain * 0.42
+                } else {
+                    sampleValue = 0
+                }
+            }
+
+            let pcm = Int16(max(-1, min(1, sampleValue)) * Double(Int16.max))
+            wav.appendLE16(UInt16(bitPattern: pcm))
+        }
+
+        try wav.write(to: url, options: .atomic)
+    }
+
+    private static func makeMetronomeBeatBuffer(
+        format: AVAudioFormat,
+        frequency: Double,
+        gain: Float,
+        beatDuration: Double
+    ) -> AVAudioPCMBuffer? {
+        let frameCount = AVAudioFrameCount(format.sampleRate * beatDuration)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+              let channelData = buffer.floatChannelData else {
+            logger.error("[M-03] Failed to allocate metronome PCM buffer (freq=\(frequency))")
+            return nil
+        }
+        buffer.frameLength = frameCount
+
+        let channel = channelData[0]
+        let clickDuration = min(0.05, beatDuration)
+        for frame in 0..<Int(frameCount) {
+            let time = Double(frame) / format.sampleRate
+            guard time < clickDuration else {
+                channel[frame] = 0
+                continue
+            }
+            let envelope = Float(exp(-time * 36))
+            let fundamental = sin(2 * .pi * frequency * time)
+            let overtone = 0.35 * sin(2 * .pi * frequency * 1.8 * time)
+            channel[frame] = Float(fundamental + overtone) * envelope * gain
+        }
+
+        return buffer
+    }
+
+    private static func userFacingLoadError(for url: URL) -> String {
+        let supportedExtensions = ["mp3", "m4a", "wav"]
+        let fileExtension = url.pathExtension.lowercased()
+        if !supportedExtensions.contains(fileExtension) {
+            return "지원 형식은 mp3, m4a, wav 입니다"
+        }
+        return "파일을 열 수 없습니다. mp3, m4a, wav 파일인지 확인하세요"
+    }
+
+    private static func loadMetadataString(
+        from metadata: [AVMetadataItem],
+        identifier: AVMetadataIdentifier
+    ) async -> String? {
+        guard let item = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: identifier).first,
+              let value = try? await item.load(.stringValue) else {
+            return nil
+        }
+        return value
+    }
+}
+
+private extension Data {
+    mutating func appendLE16(_ value: UInt16) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
+            append(contentsOf: bytes)
+        }
+    }
+
+    mutating func appendLE32(_ value: UInt32) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
+            append(contentsOf: bytes)
+        }
     }
 }

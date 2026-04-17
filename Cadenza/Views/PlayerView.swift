@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 struct PlayerView: View {
     @EnvironmentObject private var audio: AudioManager
     @State private var showFilePicker = false
+    @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
+    @State private var seekPreviewProgress = 0.0
+    @State private var isSeekingPlayback = false
 
     var body: some View {
         ZStack {
@@ -29,12 +32,35 @@ struct PlayerView: View {
                             targetBPM: audio.targetBPM,
                             originalBPM: audio.originalBPM,
                             playbackRate: audio.playbackRate,
-                            hasBPMFromMetadata: audio.hasBPMFromMetadata
+                            originalBPMSource: audio.originalBPMSource
                         )
                         .padding(.vertical, 16)
 
                         // BPM 슬라이더
-                        BPMSliderView(targetBPM: $audio.targetBPM)
+                        BPMSliderView(
+                            targetBPM: $audio.targetBPM,
+                            playbackRate: audio.playbackRate,
+                            onDecrease: { audio.nudgeTargetBPM(by: -5) },
+                            onReset: { audio.resetTargetBPM() },
+                            onIncrease: { audio.nudgeTargetBPM(by: 5) }
+                        )
+                            .padding(.horizontal, 20)
+
+                        if audio.hasLoadedTrack {
+                            Divider().background(Color.cadenzaDivider)
+
+                            playbackProgressSection
+                                .padding(.horizontal, 20)
+
+                            Divider().background(Color.cadenzaDivider)
+
+                            originalBPMControls
+                                .padding(.horizontal, 20)
+                        }
+
+                        Divider().background(Color.cadenzaDivider)
+
+                        metronomeControls
                             .padding(.horizontal, 20)
 
                         Divider().background(Color.cadenzaDivider)
@@ -59,10 +85,18 @@ struct PlayerView: View {
         }
         .fileImporter(
             isPresented: $showFilePicker,
-            allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav],
+            allowedContentTypes: [.mp3, .mpeg4Audio, .wav],
             allowsMultipleSelection: false
         ) { result in
             handleFileSelection(result)
+        }
+        .onAppear(perform: syncOriginalBPMText)
+        .onChange(of: audio.originalBPM) { _, _ in
+            syncOriginalBPMText()
+        }
+        .onChange(of: audio.playbackProgress) { _, newValue in
+            guard !isSeekingPlayback else { return }
+            seekPreviewProgress = newValue
         }
         .animation(.easeInOut(duration: 0.2), value: audio.state)
         .animation(.easeInOut(duration: 0.3), value: audio.errorMessage)
@@ -111,6 +145,22 @@ struct PlayerView: View {
                     .padding(.top, 4)
             }
             .padding(.horizontal, 20)
+        } else if audio.isMetronomeOnlyMode {
+            VStack(spacing: 8) {
+                Image(systemName: "metronome")
+                    .font(.system(size: 32))
+                    .foregroundColor(.cadenzaAccent)
+
+                Text("메트로놈 모드")
+                    .font(.cadenzaTitle2)
+                    .foregroundColor(.cadenzaTextPrimary)
+
+                Text("파일 없이 목표 BPM으로 클릭을 재생합니다")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 20)
         } else {
             // Empty state (DESIGN.md 2.2.1)
             VStack(spacing: 8) {
@@ -122,8 +172,114 @@ struct PlayerView: View {
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextTertiary)
                     .multilineTextAlignment(.center)
+
+                Text("지원 형식: mp3, m4a, wav")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextSecondary)
             }
             .padding(.vertical, 20)
+        }
+    }
+
+    private var originalBPMControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("원본 BPM")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+                Spacer()
+                if audio.needsOriginalBPMInput {
+                    Text("입력 권장")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaWarning)
+                }
+            }
+
+            HStack(spacing: 10) {
+                TextField("예: 172", text: $originalBPMText)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.done)
+                    .onSubmit(applyOriginalBPM)
+
+                Button("적용", action: applyOriginalBPM)
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaBackground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(canApplyOriginalBPM ? Color.cadenzaAccent : Color.cadenzaTextTertiary)
+                    .clipShape(Capsule())
+                    .disabled(!canApplyOriginalBPM)
+            }
+
+            Text(audio.originalBPMSource.helperText)
+                .font(.cadenzaCaption)
+                .foregroundColor(audio.needsOriginalBPMInput ? .cadenzaWarning : .cadenzaTextSecondary)
+        }
+    }
+
+    private var playbackProgressSection: some View {
+        VStack(spacing: 10) {
+            Slider(
+                value: Binding(
+                    get: { isSeekingPlayback ? seekPreviewProgress : audio.playbackProgress },
+                    set: { seekPreviewProgress = $0 }
+                ),
+                in: 0...1,
+                onEditingChanged: handleSeekEditingChanged
+            )
+            .tint(.cadenzaAccent)
+
+            HStack {
+                Text(formattedTime(displayedPlaybackTime))
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextSecondary)
+                Spacer()
+                Text(formattedTime(audio.trackDuration))
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextTertiary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("재생 진행")
+        .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(audio.trackDuration))")
+    }
+
+    // MARK: - Metronome Controls
+
+    private var metronomeControls: some View {
+        VStack(spacing: 12) {
+            Toggle(isOn: $audio.metronomeEnabled) {
+                Text("메트로놈")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+            }
+            .tint(.cadenzaAccent)
+            .accessibilityLabel("메트로놈")
+            .accessibilityValue(audio.metronomeEnabled ? "켜짐" : "꺼짐")
+
+            VStack(spacing: 6) {
+                HStack {
+                    Text("볼륨")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaTextSecondary)
+                    Spacer()
+                    Text("\(Int(audio.metronomeVolume * 100))%")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaTextTertiary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { Double(audio.metronomeVolume) },
+                        set: { audio.metronomeVolume = Float($0) }
+                    ),
+                    in: 0...1
+                )
+                .tint(.cadenzaAccent)
+                .accessibilityLabel("메트로놈 볼륨")
+                .accessibilityValue("\(Int(audio.metronomeVolume * 100)) 퍼센트")
+            }
         }
     }
 
@@ -145,19 +301,73 @@ struct PlayerView: View {
             .disabled(!isPlayable)
             .accessibilityLabel(audio.state == .playing ? "정지" : "재생")
 
+            if audio.metronomeEnabled {
+                Label("메트로놈 동작 중", systemImage: "metronome")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextSecondary)
+            }
+
             // 파일 선택
-            Button(action: { showFilePicker = true }) {
+            Button(action: {
+                audio.clearError()
+                showFilePicker = true
+            }) {
                 Label("파일 선택", systemImage: "folder")
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaAccent)
             }
             .disabled(audio.state == .playing)
             .opacity(audio.state == .playing ? 0.4 : 1.0)
+            .accessibilityLabel("파일 선택")
+
+            sampleTrackButtons
+
+            Text("지원 형식: mp3, m4a, wav")
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextTertiary)
+        }
+    }
+
+    private var sampleTrackButtons: some View {
+        VStack(spacing: 8) {
+            Text("샘플 오디오")
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextSecondary)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 8),
+                ],
+                spacing: 8
+            ) {
+                ForEach(SampleTrackPreset.allCases) { preset in
+                    Button(action: { loadSampleTrack(preset) }) {
+                        Text(preset.title)
+                            .font(.cadenzaCaption)
+                            .foregroundColor(.cadenzaTextPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.cadenzaBackgroundSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(audio.state == .playing)
+                    .opacity(audio.state == .playing ? 0.4 : 1.0)
+                    .accessibilityLabel("\(preset.title) 샘플")
+                }
+            }
         }
     }
 
     private var isPlayable: Bool {
-        audio.state == .ready || audio.state == .paused || audio.state == .playing
+        switch audio.state {
+        case .ready, .paused, .playing:
+            return true
+        case .idle:
+            return audio.canStartPlayback
+        case .loading, .error:
+            return false
+        }
     }
 
     // MARK: - Error Banner (DESIGN.md 2.2.2)
@@ -171,6 +381,7 @@ struct PlayerView: View {
                 .foregroundColor(.cadenzaTextPrimary)
             Spacer()
             Button("다른 파일 선택") {
+                audio.clearError()
                 showFilePicker = true
             }
             .font(.cadenzaCaption)
@@ -191,12 +402,60 @@ struct PlayerView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
+            audio.clearError()
             Task {
                 await audio.loadFile(url: url)
             }
-        case .failure:
-            break // 사용자가 취소한 경우
+        case .failure(let error):
+            let nsError = error as NSError
+            guard nsError.code != NSUserCancelledError else { return }
+            audio.presentError("파일 가져오기에 실패했습니다. 지원 형식은 mp3, m4a, wav 입니다")
         }
+    }
+
+    private func loadSampleTrack(_ preset: SampleTrackPreset = .clickLoop) {
+        audio.clearError()
+        Task {
+            await audio.loadSampleTrack(preset)
+        }
+    }
+
+    private var canApplyOriginalBPM: Bool {
+        guard let bpm = Double(originalBPMText) else { return false }
+        return bpm >= BPMRange.originalMin && bpm <= BPMRange.originalMax
+    }
+
+    private func syncOriginalBPMText() {
+        originalBPMText = "\(Int(audio.originalBPM.rounded()))"
+    }
+
+    private func applyOriginalBPM() {
+        guard let bpm = Double(originalBPMText) else {
+            audio.presentError("원본 BPM은 30~300 사이 숫자로 입력하세요")
+            return
+        }
+        audio.setOriginalBPM(bpm)
+    }
+
+    private var displayedPlaybackTime: TimeInterval {
+        guard isSeekingPlayback else { return audio.currentPlaybackTime }
+        return audio.trackDuration * seekPreviewProgress
+    }
+
+    private func handleSeekEditingChanged(_ isEditing: Bool) {
+        isSeekingPlayback = isEditing
+        if isEditing {
+            seekPreviewProgress = audio.playbackProgress
+        } else {
+            audio.seek(toProgress: seekPreviewProgress)
+        }
+    }
+
+    private func formattedTime(_ seconds: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded(.down)))
+        let minutes = totalSeconds / 60
+        let remainder = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, remainder)
     }
 }
 

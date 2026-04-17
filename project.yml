@@ -19,6 +19,8 @@ targets:
       - Cadenza
     settings:
       base:
+        CODE_SIGN_STYLE: Automatic
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         PRODUCT_BUNDLE_IDENTIFIER: com.jy.cadenza
