@@ -56,6 +56,13 @@ struct PlayerView: View {
 
                             originalBPMControls
                                 .padding(.horizontal, 20)
+
+                            if audio.hasBeatAlignmentAnalysis {
+                                Divider().background(Color.cadenzaDivider)
+
+                                syncDebugSection
+                                    .padding(.horizontal, 20)
+                            }
                         }
 
                         Divider().background(Color.cadenzaDivider)
@@ -243,6 +250,54 @@ struct PlayerView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("재생 진행")
         .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(audio.trackDuration))")
+    }
+
+    private var syncDebugSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Sync Debug")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+                Spacer()
+                Text(cacheLabel)
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextSecondary)
+            }
+
+            HStack {
+                debugMetric(label: "Offset", value: "\(Int((audio.effectiveBeatOffset * 1000).rounded()))ms")
+                Spacer()
+                debugMetric(label: "Nudge", value: signedMilliseconds(audio.manualBeatOffsetNudge))
+                Spacer()
+                debugMetric(label: "Confidence", value: confidenceLabel)
+            }
+
+            HStack(spacing: 10) {
+                Button("지금 맞추기") {
+                    audio.alignBeatOffsetToCurrentTap()
+                }
+                .buttonStyle(SyncNudgeButtonStyle())
+
+                Button("-40ms") {
+                    audio.nudgeBeatOffset(by: -40)
+                }
+                .buttonStyle(SyncNudgeButtonStyle())
+
+                Button("리셋") {
+                    audio.resetBeatOffsetNudge()
+                }
+                .buttonStyle(SyncNudgeButtonStyle())
+
+                Button("+40ms") {
+                    audio.nudgeBeatOffset(by: 40)
+                }
+                .buttonStyle(SyncNudgeButtonStyle())
+            }
+
+            Text("분석값이 어긋나면 곡별로 미세 보정되고 다음 재생에도 그대로 적용됩니다.")
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextSecondary)
+        }
     }
 
     // MARK: - Metronome Controls
@@ -437,6 +492,38 @@ struct PlayerView: View {
         audio.setOriginalBPM(bpm)
     }
 
+    private func debugMetric(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextTertiary)
+            Text(value)
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextPrimary)
+        }
+    }
+
+    private var cacheLabel: String {
+        switch audio.beatAlignmentCacheStatus {
+        case .hit:
+            return "cache hit"
+        case .miss:
+            return "cache miss"
+        case .none:
+            return "cache none"
+        }
+    }
+
+    private var confidenceLabel: String {
+        guard let confidence = audio.beatAlignmentConfidence else { return "-" }
+        return "\(Int((confidence * 100).rounded()))%"
+    }
+
+    private func signedMilliseconds(_ seconds: TimeInterval) -> String {
+        let milliseconds = Int((seconds * 1000).rounded())
+        return milliseconds >= 0 ? "+\(milliseconds)ms" : "\(milliseconds)ms"
+    }
+
     private var displayedPlaybackTime: TimeInterval {
         guard isSeekingPlayback else { return audio.currentPlaybackTime }
         return audio.trackDuration * seekPreviewProgress
@@ -465,4 +552,16 @@ extension UTType {
     static let mp3 = UTType(filenameExtension: "mp3") ?? .audio
     static let mpeg4Audio = UTType("public.mpeg-4-audio") ?? .audio
     static let wav = UTType(filenameExtension: "wav") ?? .audio
+}
+
+private struct SyncNudgeButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.cadenzaCaption)
+            .foregroundColor(.cadenzaTextPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.cadenzaBackgroundSecondary.opacity(configuration.isPressed ? 0.7 : 1))
+            .clipShape(Capsule())
+    }
 }

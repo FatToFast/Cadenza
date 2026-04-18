@@ -7,26 +7,49 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		24B655F7C0EAC5D3A8A5FAAB /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */; };
+		0C71CE4FFC6FC8B69091148F /* BeatOffsetRefinementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */; };
+		280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */; };
+		425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */; };
 		5AF06C82DDB469D193EBFC93 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32E8307CA39DD324E6A03F0 /* AudioManager.swift */; };
 		78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */; };
 		7CCD087ADED37595EFD55A1F /* BPMDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */; };
+		86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */; };
 		86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F8FFC774733449AD9A28B63 /* Constants.swift */; };
 		AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */; };
 		AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498EA72F6CA1930D69CB9A0B /* PlayerView.swift */; };
+		AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */; };
+		B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */; };
+		F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */; };
 		FF5D37C411CB473DD5D84C27 /* BPMSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		530AF5D7CDD499B0635FE0D0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D1AE8EC53EC28557F8771111 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E105858D0D4F4616F76B78CC;
+			remoteInfo = Cadenza;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = "Kickdrum Rocket-2.mp3"; sourceTree = "<group>"; };
 		3F8FFC774733449AD9A28B63 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		498EA72F6CA1930D69CB9A0B /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMDisplayView.swift; sourceTree = "<group>"; };
+		59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatOffsetRefinementTests.swift; sourceTree = "<group>"; };
 		602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenzaApp.swift; sourceTree = "<group>"; };
+		680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModelsTests.swift; sourceTree = "<group>"; };
 		684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMMetadataReader.swift; sourceTree = "<group>"; };
+		6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensatorTests.swift; sourceTree = "<group>"; };
+		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
 		81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMSliderView.swift; sourceTree = "<group>"; };
+		9F48386185F7E37392C33B0A /* CadenzaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CadenzaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatAlignmentAnalyzer.swift; sourceTree = "<group>"; };
+		B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensator.swift; sourceTree = "<group>"; };
 		D32E8307CA39DD324E6A03F0 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		DDFBE399676A3E84FCF154B9 /* Cadenza.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cadenza.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = "Kickdrum Rocket-2.mp3"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -43,6 +66,7 @@
 			isa = PBXGroup;
 			children = (
 				DDFBE399676A3E84FCF154B9 /* Cadenza.app */,
+				9F48386185F7E37392C33B0A /* CadenzaTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				6CC5079B706643F82BA37E7B /* Cadenza */,
+				97DB336B24E445CCA8E89B06 /* Tests */,
 				47BD6E1E8D941720FAF815FC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,16 +103,29 @@
 		915C908E1661614A51514CAB /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				31412DE9ABF895F2B2D78355 /* Kickdrum Rocket-2.mp3 */,
+				F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		97DB336B24E445CCA8E89B06 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */,
+				6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */,
+				680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		D16B9296CD9F48A739F53048 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */,
 				684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */,
 				3F8FFC774733449AD9A28B63 /* Constants.swift */,
+				B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */,
+				7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -104,12 +142,30 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A0A055552C269F135507E11B /* CadenzaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 27A7295BFABAF56CA504C014 /* Build configuration list for PBXNativeTarget "CadenzaTests" */;
+			buildPhases = (
+				7C8FFF578A5FC908B304F09C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BC8FADC4A59BD94CFDDFB505 /* PBXTargetDependency */,
+			);
+			name = CadenzaTests;
+			packageProductDependencies = (
+			);
+			productName = CadenzaTests;
+			productReference = 9F48386185F7E37392C33B0A /* CadenzaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E105858D0D4F4616F76B78CC /* Cadenza */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F6790ED2D913E5D732C38092 /* Build configuration list for PBXNativeTarget "Cadenza" */;
 			buildPhases = (
-				6B4F7A8E11A44D35C515B71A /* Resources */,
 				06AC62204230D79917D49F6B /* Sources */,
+				E639D2B4933C56CA58892C79 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -131,6 +187,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					E105858D0D4F4616F76B78CC = {
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 4657FC78F268FEA51E353563 /* Build configuration list for PBXProject "Cadenza" */;
@@ -148,16 +207,17 @@
 			projectRoot = "";
 			targets = (
 				E105858D0D4F4616F76B78CC /* Cadenza */,
+				A0A055552C269F135507E11B /* CadenzaTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		6B4F7A8E11A44D35C515B71A /* Resources */ = {
+		E639D2B4933C56CA58892C79 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				24B655F7C0EAC5D3A8A5FAAB /* Kickdrum Rocket-2.mp3 in Resources */,
+				B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,19 +232,77 @@
 				7CCD087ADED37595EFD55A1F /* BPMDisplayView.swift in Sources */,
 				AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */,
 				FF5D37C411CB473DD5D84C27 /* BPMSliderView.swift in Sources */,
+				F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */,
 				78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */,
 				86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */,
+				86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */,
+				AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */,
 				AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7C8FFF578A5FC908B304F09C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C71CE4FFC6FC8B69091148F /* BeatOffsetRefinementTests.swift in Sources */,
+				425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */,
+				280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		BC8FADC4A59BD94CFDDFB505 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E105858D0D4F4616F76B78CC /* Cadenza */;
+			targetProxy = 530AF5D7CDD499B0635FE0D0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		08A77F77DA82968D0106872D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenzaTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cadenza.app/Cadenza";
+			};
+			name = Debug;
+		};
+		4F7E4FA4242BEAD5026ABB89 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jy.cadenzaTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cadenza.app/Cadenza";
+			};
+			name = Release;
+		};
 		64ED35CA32E459B9E54E3D84 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -207,6 +325,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -349,6 +468,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		27A7295BFABAF56CA504C014 /* Build configuration list for PBXNativeTarget "CadenzaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				08A77F77DA82968D0106872D /* Debug */,
+				4F7E4FA4242BEAD5026ABB89 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		4657FC78F268FEA51E353563 /* Build configuration list for PBXProject "Cadenza" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

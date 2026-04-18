@@ -61,8 +61,12 @@ struct BPMDisplayView: View {
         switch originalBPMSource {
         case .metadata:
             return .cadenzaAccent
+        case .analysis:
+            return Color.cadenzaAccent.opacity(0.84)
         case .assumedDefault:
             return .cadenzaWarning
+        case .preset:
+            return Color.cadenzaAccent.opacity(0.72)
         case .manual:
             return .cadenzaTextSecondary
         }

@@ -5,45 +5,6 @@ import os
 
 private let logger = Logger(subsystem: "com.cadenza.app", category: "AudioManager")
 
-// MARK: - State Machine (SPEC.md 1.6)
-
-enum PlaybackState: String {
-    case idle
-    case loading
-    case ready
-    case playing
-    case paused
-    case error
-}
-
-enum OriginalBPMSource: Equatable {
-    case metadata
-    case assumedDefault
-    case manual
-
-    var badgeText: String {
-        switch self {
-        case .metadata:
-            return "자동 감지"
-        case .assumedDefault:
-            return "확인 필요"
-        case .manual:
-            return "직접 입력"
-        }
-    }
-
-    var helperText: String {
-        switch self {
-        case .metadata:
-            return "파일 메타데이터에서 BPM을 읽었습니다. 필요하면 직접 수정할 수 있습니다."
-        case .assumedDefault:
-            return "메타데이터가 없어 120 BPM으로 가정했습니다. 정확한 속도를 위해 직접 입력하세요."
-        case .manual:
-            return "직접 입력한 BPM을 기준으로 재생 속도를 계산합니다."
-        }
-    }
-}
-
 enum SampleTrackPreset: String, CaseIterable, Identifiable {
     case clickLoop
     case synthPulse
@@ -129,6 +90,9 @@ final class AudioManager: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentPlaybackTime: TimeInterval = 0
     @Published private(set) var trackDuration: TimeInterval = 0
+    @Published private(set) var beatAlignmentConfidence: Double?
+    @Published private(set) var beatAlignmentCacheStatus: BeatAlignmentCacheStatus = .none
+    @Published private(set) var manualBeatOffsetNudge: TimeInterval = 0
     @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
         didSet { handleMetronomeEnabledChange() }
     }
@@ -150,6 +114,15 @@ final class AudioManager: ObservableObject {
         guard trackDuration > 0 else { return 0 }
         return min(max(currentPlaybackTime / trackDuration, 0), 1)
     }
+    var hasBeatAlignmentAnalysis: Bool { beatAlignmentAnalysis != nil }
+    var effectiveBeatOffset: TimeInterval {
+        let beatDuration = 60.0 / max(originalBPM, 1)
+        return BeatOffsetAdjustment.effectiveOffset(
+            detectedOffset: beatAlignmentAnalysis?.beatOffsetSeconds ?? 0,
+            manualNudge: manualBeatOffsetNudge,
+            beatDuration: beatDuration
+        )
+    }
     var isMetronomeOnlyMode: Bool {
         audioFile == nil && (state == .playing || state == .paused) && metronomeEnabled
     }
@@ -161,11 +134,13 @@ final class AudioManager: ObservableObject {
     private let metronomeNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
     private var audioFile: AVAudioFile?
+    private var beatAlignmentAnalysis: BeatAlignmentAnalysis?
     private var _bpmFromMetadata = false
     private var hasScheduledPlayback = false
     private var isScheduling = false
     private var scheduledLoopStartFrame: AVAudioFramePosition = 0
     private var currentScheduledStartFrame: AVAudioFramePosition = 0
+    private var sourceBeatOffsetSeconds: TimeInterval = 0
     private var metronomeBeatIndex = 0
     private var metronomeScheduledBeats = 0
     private var isMetronomeRunning = false
@@ -182,8 +157,11 @@ final class AudioManager: ObservableObject {
     /// 현재 로드된 파일의 security-scoped URL.
     /// 트랙 수명 동안 권한을 유지하고, 새 파일 로드 또는 해제 시 반납한다.
     private var currentAccessedURL: URL?
+    private var currentTrackURL: URL?
     private var isAudioSessionConfigured = false
     private var progressTimer: Timer?
+    private var pendingPresetBPMHint: Double?
+    private var cachedMetronomeDelay: TimeInterval?
 
     // MARK: - Init
 
@@ -240,6 +218,8 @@ final class AudioManager: ObservableObject {
                         logger.info("Interruption began, paused playback")
                     }
                 case .ended:
+                    // 인터럽션 후 엔진이 재시작되면 AU latency가 달라질 수 있어 캐시 무효화.
+                    self.cachedMetronomeDelay = nil
                     if shouldResume {
                         self.play()
                         logger.info("Interruption ended, auto-resumed")
@@ -265,6 +245,8 @@ final class AudioManager: ObservableObject {
 
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // 라우트(AirPods/BT/스피커) 변경 시 latency 값이 크게 달라질 수 있으므로 캐시 무효화.
+                self.cachedMetronomeDelay = nil
                 if reason == .oldDeviceUnavailable, self.state == .playing {
                     self.playerNode.pause()
                     self.stopMetronome()
@@ -304,9 +286,12 @@ final class AudioManager: ObservableObject {
     // MARK: - File Loading
 
     func loadFile(url: URL) async {
+        // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.
+        defer { pendingPresetBPMHint = nil }
         // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
         playerNode.stop()
         playerNode.reset()
+        stopMetronome()
         hasScheduledPlayback = false
         isScheduling = false
         scheduledLoopStartFrame = 0
@@ -318,16 +303,22 @@ final class AudioManager: ObservableObject {
 
         // 이전 파일의 security-scoped 권한 반납
         releaseCurrentURL()
+        currentTrackURL = nil
 
         state = .loading
         errorMessage = nil
         audioFile = nil
+        beatAlignmentAnalysis = nil
         originalBPM = BPMRange.originalDefault
         originalBPMSource = .assumedDefault
         currentPlaybackTime = 0
         trackDuration = 0
         trackTitle = nil
         trackArtist = nil
+        beatAlignmentConfidence = nil
+        beatAlignmentCacheStatus = .none
+        manualBeatOffsetNudge = 0
+        sourceBeatOffsetSeconds = 0
         _bpmFromMetadata = false
 
         // [P1 fix] 새 파일의 security-scoped 권한 획득 → 트랙 수명 동안 유지
@@ -335,6 +326,7 @@ final class AudioManager: ObservableObject {
         if accessing {
             currentAccessedURL = url
         }
+        currentTrackURL = url
 
         do {
             let file = try AVAudioFile(forReading: url)
@@ -357,7 +349,8 @@ final class AudioManager: ObservableObject {
             }
 
             // BPM 메타데이터 읽기
-            if let bpm = await BPMMetadataReader.readBPM(from: url) {
+            let metadataBPM = await BPMMetadataReader.readBPM(from: url)
+            if let bpm = metadataBPM {
                 originalBPM = bpm
                 _bpmFromMetadata = true
                 originalBPMSource = .metadata
@@ -367,6 +360,28 @@ final class AudioManager: ObservableObject {
                 _bpmFromMetadata = false
                 originalBPMSource = .assumedDefault
                 logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
+            }
+
+            let analysisHint = metadataBPM ?? pendingPresetBPMHint
+            let alignmentResult = try? await (
+                Task.detached(priority: .userInitiated) {
+                    try BeatAlignmentAnalyzer.loadOrAnalyze(url: url, expectedBPM: analysisHint)
+                }.value
+            )
+            beatAlignmentCacheStatus = alignmentResult?.cacheStatus ?? .none
+
+            if let analysis = alignmentResult?.analysis {
+                beatAlignmentAnalysis = analysis
+                beatAlignmentConfidence = analysis.confidence
+                manualBeatOffsetNudge = analysis.manualNudgeSeconds
+                sourceBeatOffsetSeconds = effectiveOffset(for: analysis)
+                if metadataBPM == nil {
+                    originalBPM = analysis.estimatedBPM
+                    _bpmFromMetadata = false
+                    originalBPMSource = .analysis
+                    logger.info("[track_loaded] BPM from audio analysis: \(analysis.estimatedBPM)")
+                }
+                logger.info("[track_loaded] Beat offset from analysis: \(analysis.beatOffsetSeconds)s confidence=\(analysis.confidence) cache=\(self.beatAlignmentCacheStatus.rawValue)")
             }
 
             updateRate()
@@ -397,6 +412,7 @@ final class AudioManager: ObservableObject {
                 }.value
             }
 
+            pendingPresetBPMHint = preset.bpm
             await loadFile(url: sampleURL)
 
             if state == .ready {
@@ -404,8 +420,9 @@ final class AudioManager: ObservableObject {
                 trackArtist = preset.artist
                 if !hasBPMFromMetadata {
                     originalBPM = preset.bpm
+                    // Preset fallback uses the bundled sample's known BPM, not file metadata.
                     _bpmFromMetadata = false
-                    originalBPMSource = .manual
+                    originalBPMSource = .preset
                     updateRate()
                 }
             }
@@ -429,17 +446,23 @@ final class AudioManager: ObservableObject {
             if !engine.isRunning {
                 try engine.start()
             }
+            refreshMetronomeLatencyIfNeeded()
 
             if audioFile != nil, !hasScheduledPlayback {
                 scheduleLoop()
             }
 
+            let sourceTime = currentSourcePlaybackTime()
+            let playbackAnchor = makePlaybackAnchor()
             if audioFile != nil {
-                playerNode.play()
+                playerNode.play(at: playbackAnchor)
                 startProgressUpdates()
             }
             if metronomeEnabled {
-                startMetronome()
+                startMetronome(
+                    alignedToSourceTime: sourceTime,
+                    anchorHostTime: playbackAnchor.hostTime
+                )
             }
             state = .playing
             logger.info("[run_started] targetBPM=\(self.targetBPM) hasFile=\(self.audioFile != nil) metronomeOn=\(self.metronomeEnabled)")
@@ -509,6 +532,9 @@ final class AudioManager: ObservableObject {
                 self.hasScheduledPlayback = false
                 self.currentScheduledStartFrame = 0
                 self.scheduleLoop()
+                if self.metronomeEnabled {
+                    self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
+                }
                 logger.debug("Loop: re-scheduled from completion handler")
             }
         }
@@ -534,6 +560,66 @@ final class AudioManager: ObservableObject {
         targetBPM = next.rounded()
     }
 
+    func nudgeBeatOffset(by milliseconds: Double) {
+        guard let analysis = beatAlignmentAnalysis,
+              let url = currentTrackURL else { return }
+
+        let nextNudge = manualBeatOffsetNudge + (milliseconds / 1000)
+        if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(nextNudge, for: url, analysis: analysis) {
+            beatAlignmentAnalysis = updated
+            manualBeatOffsetNudge = updated.manualNudgeSeconds
+            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
+            if state == .playing, metronomeEnabled {
+                startMetronome(
+                    alignedToSourceTime: currentSourcePlaybackTime(),
+                    anchorHostTime: mach_absolute_time()
+                )
+            }
+        }
+    }
+
+    func resetBeatOffsetNudge() {
+        guard manualBeatOffsetNudge != 0 else { return }
+        guard let analysis = beatAlignmentAnalysis,
+              let url = currentTrackURL else { return }
+
+        if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(0, for: url, analysis: analysis) {
+            beatAlignmentAnalysis = updated
+            manualBeatOffsetNudge = updated.manualNudgeSeconds
+            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
+            if state == .playing, metronomeEnabled {
+                startMetronome(
+                    alignedToSourceTime: currentSourcePlaybackTime(),
+                    anchorHostTime: mach_absolute_time()
+                )
+            }
+        }
+    }
+
+    func alignBeatOffsetToCurrentTap() {
+        guard let analysis = beatAlignmentAnalysis,
+              let url = currentTrackURL else { return }
+
+        let beatDuration = 60.0 / max(analysis.estimatedBPM, 1)
+        let targetNudge = BeatOffsetAdjustment.manualNudgeToAlignTap(
+            currentSourceTime: currentSourcePlaybackTime(),
+            detectedOffset: analysis.beatOffsetSeconds,
+            beatDuration: beatDuration
+        )
+
+        if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(targetNudge, for: url, analysis: analysis) {
+            beatAlignmentAnalysis = updated
+            manualBeatOffsetNudge = updated.manualNudgeSeconds
+            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
+            if state == .playing, metronomeEnabled {
+                startMetronome(
+                    alignedToSourceTime: currentSourcePlaybackTime(),
+                    anchorHostTime: mach_absolute_time()
+                )
+            }
+        }
+    }
+
     func resetTargetBPM() {
         targetBPM = BPMRange.targetDefault
     }
@@ -557,8 +643,15 @@ final class AudioManager: ObservableObject {
         scheduleLoop()
 
         if wasPlaying {
-            playerNode.play()
+            let playbackAnchor = makePlaybackAnchor()
+            playerNode.play(at: playbackAnchor)
             startProgressUpdates()
+            if metronomeEnabled {
+                startMetronome(
+                    alignedToSourceTime: currentPlaybackTime,
+                    anchorHostTime: playbackAnchor.hostTime
+                )
+            }
         } else {
             stopProgressUpdates()
         }
@@ -566,6 +659,10 @@ final class AudioManager: ObservableObject {
 
     func clearError() {
         errorMessage = nil
+        state = PlaybackStateRecovery.stateAfterClearingError(
+            currentState: state,
+            hasLoadedTrack: hasLoadedTrack
+        )
     }
 
     func presentError(_ message: String) {
@@ -588,7 +685,10 @@ final class AudioManager: ObservableObject {
 
         if metronomeEnabled {
             if state == .playing {
-                startMetronome()
+                startMetronome(
+                    alignedToSourceTime: currentSourcePlaybackTime(),
+                    anchorHostTime: mach_absolute_time()
+                )
             }
             return
         }
@@ -606,19 +706,49 @@ final class AudioManager: ObservableObject {
 
     private func restartMetronomeIfNeeded() {
         guard isMetronomeRunning, metronomeEnabled else { return }
-        startMetronome()
+        startMetronome(
+            alignedToSourceTime: currentSourcePlaybackTime(),
+            anchorHostTime: mach_absolute_time()
+        )
     }
 
-    private func startMetronome() {
+    /// playerNode → timePitch → mixer 경로와 metronomeNode → mixer 경로의 지연 차이를 캐시한다.
+    /// `engine.start()` 이후에만 AU latency가 유효하므로 호출 순서가 중요하다.
+    private func refreshMetronomeLatencyIfNeeded() {
+        guard cachedMetronomeDelay == nil else { return }
+        let auLatency = timePitch.auAudioUnit.latency
+        let compensation = LatencyCompensator.metronomeDelaySeconds(
+            timePitchAULatency: auLatency,
+            timePitchPresentation: 0,
+            mixerPresentation: 0
+        )
+        cachedMetronomeDelay = compensation
+        logger.debug("[latency_refresh] timePitchAULatency=\(auLatency)s compensation=\(compensation)s")
+    }
+
+    private func startMetronome(
+        alignedToSourceTime sourceTime: TimeInterval = 0,
+        anchorHostTime: UInt64
+    ) {
         guard metronomeEnabled else { return }
 
         stopMetronome()
-        metronomeBeatIndex = 0
+        let syncPlan = MetronomeSyncPlanner.planNextBeat(
+            currentSourceTime: sourceTime,
+            sourceBeatOffset: sourceBeatOffsetSeconds,
+            originalBPM: originalBPM,
+            targetBPM: targetBPM
+        )
+        metronomeBeatIndex = syncPlan.startingBeatIndex
         metronomeScheduledBeats = 0
         isMetronomeRunning = true
         rebuildMetronomeBuffers()
         scheduleMetronomeBeatsIfNeeded()
-        metronomeNode.play()
+        let latencyComp = cachedMetronomeDelay ?? 0
+        let firstBeatHostTime = anchorHostTime + AVAudioTime.hostTime(
+            forSeconds: syncPlan.nextBeatDelay + latencyComp
+        )
+        metronomeNode.play(at: AVAudioTime(hostTime: firstBeatHostTime))
     }
 
     private func stopMetronome() {
@@ -690,6 +820,26 @@ final class AudioManager: ObservableObject {
     private func stopProgressUpdates() {
         progressTimer?.invalidate()
         progressTimer = nil
+    }
+
+    private func currentSourcePlaybackTime() -> TimeInterval {
+        if state == .playing {
+            updateCurrentPlaybackTime()
+        }
+        return max(currentPlaybackTime, 0)
+    }
+
+    private func effectiveOffset(for analysis: BeatAlignmentAnalysis) -> TimeInterval {
+        let beatDuration = 60.0 / max(analysis.estimatedBPM, 1)
+        return BeatOffsetAdjustment.effectiveOffset(
+            detectedOffset: analysis.beatOffsetSeconds,
+            manualNudge: analysis.manualNudgeSeconds,
+            beatDuration: beatDuration
+        )
+    }
+
+    private func makePlaybackAnchor(secondsFromNow: TimeInterval = 0.06) -> AVAudioTime {
+        AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: secondsFromNow))
     }
 
     private func updateCurrentPlaybackTime() {
@@ -806,6 +956,9 @@ final class AudioManager: ObservableObject {
                 } else {
                     sampleValue = 0
                 }
+            case .kickdrumRocket:
+                // Bundled MP3 preset never uses synthesized sample generation.
+                sampleValue = 0
             }
 
             let pcm = Int16(max(-1, min(1, sampleValue)) * Double(Int16.max))
