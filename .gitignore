@@ -2,6 +2,7 @@
 *.xcodeproj/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 DerivedData/
+DerivedData-*/
 *.moved-aside
 *.pbxuser
 !default.pbxuser
@@ -30,3 +31,7 @@ Package.resolved
 
 # Claude
 .claude/
+
+# oh-my-claudecode runtime state
+.omc/
+.omx/
