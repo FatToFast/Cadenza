@@ -138,13 +138,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
           await q.remove(at: q.currentIndex)
           XCTAssertEqual(audio.loadedURLs.last?.lastPathComponent, "B.wav")
       }
-      func testRemoveLastCurrentClosesQueue() async {
+      func testRemoveLastCurrentDeactivatesButKeepsPriorItems() async {
           let q = PlaybackQueue(audio: MockAudio(), resolver: MockResolver())
           await q.load(items: [.fileStub("A"), .fileStub("B")])
           await q.playCurrent()
           await q.advance()            // currentIndex = 1
-          await q.remove(at: 1)        // 마지막 제거
-          XCTAssertTrue(q.items.isEmpty)
+          await q.remove(at: 1)        // 현재(마지막) 제거 — [A]만 남음, 비활성화
+          XCTAssertEqual(q.items.count, 1)
+          XCTAssertEqual(q.items.first?.title, "A")
           XCTAssertFalse(q.isActive)
       }
   }
