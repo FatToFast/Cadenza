@@ -552,6 +552,7 @@ final class AudioManager: ObservableObject {
                     }
                     logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
                 case .notify:
+                    self.state = .paused
                     self.trackEndedSubject.send(())
                     logger.debug("Track ended, notify (gen=\(capturedGeneration))")
                 }
