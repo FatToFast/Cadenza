@@ -289,6 +289,91 @@ Tests/
 - **Background audio entitlement** — 빠뜨리면 잠금화면 시 재생 중단. Info.plist 변경 확인 필수.
 - **구독 만료 탐지** — iOS는 앱에 명시적 알림을 주지 않음. 연속 실패 카운트가 유일한 간접 신호.
 
+## 인터페이스 계약 명세 (리뷰 보강)
+
+### `AssetResolver.resolve` async 계약
+`resolve(_:)`는 **tmp WAV 파일이 디스크에 완전히 쓰여지고 경로가 안정화된 뒤**에만 반환한다. 부분 쓰기·쓰기 중 상태의 URL을 돌려주지 않는다. 호출자는 반환된 URL을 즉시 `AVAudioFile(forReading:)`에 전달해도 안전하다는 전제를 갖는다. 파일 URL(소스가 `.file`)인 경우는 즉시 passthrough, Apple Music URL인 경우는 AVAssetReader가 모든 프레임을 write 후 `close()` 완료 뒤 반환한다.
+
+### `AudioManager.loadFile` 시그니처 마이그레이션
+기존 `func loadFile(url: URL) async` 는 유지하되 내부적으로 `loadFile(url:generation:)`를 호출한다:
+
+```swift
+func loadFile(url: URL) async {
+    await loadFile(url: url, generation: nextGeneration())
+}
+func loadFile(url: URL, generation: Int) async { ... }
+private func nextGeneration() -> Int { trackGeneration += 1; return trackGeneration }
+```
+
+모든 call site(PlayerView의 파일 피커 경로, loadSampleTrack)는 변경 없이 동작하며 generation은 자동 부여된다. Queue 경로만 명시적으로 `generation:` 오버로드를 사용한다.
+
+### Play 버튼을 prefetch 완료 전에 누른 경우
+Queue의 `isActive = true` 직후 첫 `playCurrent()`는 `resolve` 대기 중이다. 이 구간은 **AudioManager.state = .loading** 을 그대로 사용 (기존 loadFile이 state를 .loading으로 세팅하는 경로). UI는 기존 loading 표시 재사용 — PlayerView에 별도 로딩 상태 추가하지 않는다. 사용자가 그 사이 play 버튼을 추가로 누르면 무시한다(기존 AudioManager.play 가드 `canResumeTrack || canStartMetronomeOnly`가 .loading 상태를 제외).
+
+### 재생 중인 트랙을 큐에서 제거
+`remove(at: currentIndex)` 호출:
+1. 해당 인덱스 항목 삭제
+2. currentIndex는 고정 (이제 그 인덱스에 새 트랙이 있음, 즉 원래 다음 곡)
+3. `playCurrent()` 호출 → 새 현재 트랙 로드·재생
+4. currentIndex가 `items.count` 이상이면 queue complete 경로
+
+즉 "현재 곡 제거 = 다음 곡으로 전진". 명시적 선택.
+
+### 파일 피커 트랙 재생 중 Apple Music import
+시나리오: 사용자가 파일 A를 재생 중인데 "Apple Music 가져오기" 탭 후 플레이리스트 B 선택.
+
+동작: 기존 크기 1 큐(파일 A)가 **플레이리스트 B 큐로 대체**된다. A 재생은 즉시 멈추고, B의 첫 재생 가능한 트랙이 load·play된다. 사용자가 실수를 방지할 수 있도록 피커 확정 직전에 "현재 재생 중지됩니다" 안내를 **표시하지 않는다 (v1)** — 일반 음악 앱 관례상 새 선택은 대체 동작이 자연스러움.
+
+### 로컬라이제이션 컨벤션
+v1은 **한국어 단일 언어**. 문자열 리소스 추출(Localizable.strings) 없이 인라인 한국어 유지. 기존 코드베이스(`Constants.swift`, `AudioManager.swift`, `PlaybackModels.swift`)가 동일 패턴이라 일관성 유지 목적. i18n은 v2 이후 과제.
+
+### 테스트 케이스 구체 예시 (카테고리당 1개)
+
+**`PlaybackQueueTests`**
+```swift
+func testAdvanceSkipsUnplayableTracks() async {
+    let queue = PlaybackQueue(audio: MockAudio(), resolver: MockResolver())
+    await queue.load(items: [playable("A"), unplayable("B"), playable("C")])
+    await queue.playCurrent()     // index=0, A 로드 시도
+    audio.simulateTrackEnded()    // → advance
+    XCTAssertEqual(queue.currentIndex, 2)     // B 스킵, C 도달
+}
+```
+
+**`AssetResolverEvictionTests`**
+```swift
+func testN1EvictionDeletesOldestAfterTwoResolves() async throws {
+    let resolver = AssetResolver(tmpDir: testTmpDir)
+    let first = try await resolver.resolve(item("A"))  // tmp/A.wav 생성
+    let second = try await resolver.resolve(item("B")) // tmp/B.wav + A.wav 삭제
+    XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+}
+```
+
+**`AudioManagerGenerationTests`**
+```swift
+func testStaleCompletionHandlerIsDiscarded() async {
+    let audio = AudioManager()
+    await audio.loadFile(url: fileA)          // generation=1
+    let capturedGen = audio.trackGeneration
+    await audio.loadFile(url: fileB)          // generation=2
+    audio.simulateCompletionHandler(generation: capturedGen)
+    // assert: trackEndedSubject did NOT emit, scheduleLoop not reinvoked
+}
+```
+
+**`NowPlayingInfoTests`**
+```swift
+func testQueueContextIsNilWhenSingleFilePickerTrack() {
+    let info = NowPlayingInfo.fromAudioManager(audio, queue: size1Queue)
+    XCTAssertNil(info.queueContext)
+    XCTAssertEqual(info.title, "File A")
+}
+```
+
+나머지 테스트는 위 예시를 템플릿 삼아 구현 중 채운다.
+
 ## 검증 방법 (요약)
 
 1. **유닛**: `xcodebuild test -scheme CadenzaTests -destination 'iPhone 17 Pro' -derivedDataPath /tmp/...` 전부 통과
