@@ -20,4 +20,10 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(n, 1)
         c.cancel()
     }
+    func testDefaultNowPlayingEmpty() {
+        let info = AudioManager().currentNowPlayingInfo
+        XCTAssertNil(info.title)
+        XCTAssertEqual(info.originalBPM, BPMRange.originalDefault)
+        XCTAssertNil(info.queueContext)
+    }
 }

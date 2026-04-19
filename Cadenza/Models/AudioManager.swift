@@ -127,6 +127,16 @@ final class AudioManager: ObservableObject {
         audioFile == nil && (state == .playing || state == .paused) && metronomeEnabled
     }
 
+    var currentNowPlayingInfo: NowPlayingInfo {
+        NowPlayingInfo(
+            title: trackTitle, artist: trackArtist,
+            originalBPM: originalBPM, originalBPMSource: originalBPMSource,
+            playbackProgress: trackDuration > 0 ? currentPlaybackTime / trackDuration : 0,
+            playbackDuration: trackDuration,
+            queueContext: nil
+        )
+    }
+
     // MARK: - Private
 
     private let engine = AVAudioEngine()
