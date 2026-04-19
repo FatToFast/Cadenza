@@ -292,7 +292,7 @@ final class AudioManager: ObservableObject {
         await loadFile(url: url, generation: gen)
     }
 
-    func loadFile(url: URL, generation: Int) async {
+    private func loadFile(url: URL, generation: Int) async {
         self.trackGeneration = generation
         // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.
         defer { pendingPresetBPMHint = nil }
