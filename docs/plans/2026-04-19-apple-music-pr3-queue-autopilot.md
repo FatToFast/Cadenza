@@ -134,9 +134,18 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
           let q = PlaybackQueue(audio: audio, resolver: MockResolver())
           await q.load(items: [.fileStub("A"), .fileStub("B")])
           await q.playCurrent()
-          q.remove(at: q.currentIndex)
-          await q.playCurrent()
+          // remove(at: currentIndex)가 내부적으로 playCurrent 호출 — 별도 수동 호출 불필요
+          await q.remove(at: q.currentIndex)
           XCTAssertEqual(audio.loadedURLs.last?.lastPathComponent, "B.wav")
+      }
+      func testRemoveLastCurrentClosesQueue() async {
+          let q = PlaybackQueue(audio: MockAudio(), resolver: MockResolver())
+          await q.load(items: [.fileStub("A"), .fileStub("B")])
+          await q.playCurrent()
+          await q.advance()            // currentIndex = 1
+          await q.remove(at: 1)        // 마지막 제거
+          XCTAssertTrue(q.items.isEmpty)
+          XCTAssertFalse(q.isActive)
       }
   }
   ```
@@ -218,10 +227,21 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
           await playCurrent()
       }
 
-      func remove(at index: Int) {
+      func remove(at index: Int) async {
           guard items.indices.contains(index) else { return }
+          let wasCurrent = (index == currentIndex)
           items.remove(at: index)
           if index < currentIndex { currentIndex -= 1 }
+          if items.isEmpty { clear(); return }
+          guard wasCurrent else { return }
+          // 현재 재생 중이던 항목을 제거 — currentIndex는 이제 "다음 곡"을 가리킴.
+          // 끝을 넘어섰다면 큐 종료, 아니면 즉시 로드·재생.
+          if currentIndex >= items.count {
+              isActive = false
+              audio.playbackEndBehavior = .loop
+              return
+          }
+          await playCurrent()
       }
 
       func clear() {
@@ -387,7 +407,11 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
                           Task { await queue.jump(to: idx); dismiss() }
                       }
                   }
-                  .onDelete { $0.forEach { queue.remove(at: $0) } }
+                  .onDelete { indexSet in
+                      Task {
+                          for idx in indexSet.sorted(by: >) { await queue.remove(at: idx) }
+                      }
+                  }
               }
               .navigationTitle("큐")
               .toolbar { ToolbarItem(placement: .cancellationAction) {

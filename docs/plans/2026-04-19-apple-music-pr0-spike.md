@@ -109,7 +109,15 @@ enum AppleMusicSpike {
         let tmpURL = dir.appendingPathComponent("\(persistentID).wav")
         try? FileManager.default.removeItem(at: tmpURL)
 
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+        // AVAssetReaderTrackOutput가 16-bit interleaved PCM을 뱉으므로
+        // 버퍼 포맷도 그와 동일하게 맞춰야 int16ChannelData에 정상 memcpy 가능.
+        // `standardFormatWithSampleRate`는 non-interleaved Float32이라 호환 안 됨.
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 44_100,
+            channels: 2,
+            interleaved: true
+        ) else { throw NSError(domain: "Spike", code: 3) }
         let file = try AVAudioFile(forWriting: tmpURL, settings: format.settings)
 
         while reader.status == .reading, let sampleBuffer = output.copyNextSampleBuffer() {
@@ -118,10 +126,14 @@ enum AppleMusicSpike {
             var dataPointer: UnsafeMutablePointer<Int8>?
             if CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer) == noErr,
                let dataPointer {
-                let frameCount = AVAudioFrameCount(length / 4)
+                let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
+                let frameCount = AVAudioFrameCount(length / bytesPerFrame)
                 if let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) {
                     buffer.frameLength = frameCount
-                    memcpy(buffer.int16ChannelData?[0], dataPointer, length)
+                    // interleaved Int16이면 int16ChannelData[0]가 (L, R, L, R, ...) 로 배치됨
+                    if let dest = buffer.int16ChannelData?[0] {
+                        memcpy(dest, dataPointer, length)
+                    }
                     try file.write(from: buffer)
                 }
             }

@@ -30,6 +30,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
 
 ---
 
+## Task 0: String Catalog 기반 구축 (DESIGN.md §6 준수)
+
+DESIGN.md §6가 "iOS 17+ String Catalog(`.xcstrings`)로 한국어+영어 처음부터 병행"을 요구. 본 PR에서 새로 추가되는 모든 사용자 노출 문자열은 여기 등록한다.
+
+**Files**: Create `Cadenza/Resources/Localizable.xcstrings`
+
+- [ ] **Step 1**: Xcode에서 `Cadenza/Resources/` 그룹 생성 후 **File → New File → String Catalog** 로 `Localizable.xcstrings` 추가. 기본 언어 `ko`, 대응 언어 `en`.
+- [ ] **Step 2**: xcodegen이 resources를 자동으로 감지하도록 `project.yml`의 `targets.Cadenza.sources`에 `Cadenza/Resources`가 이미 포함돼 있는지 확인. 빠졌으면 추가.
+- [ ] **Step 3**: 초기 엔트리 4개(아래 Task들에서 실제 사용):
+  - `apple_music_picker_title` — ko: "Apple Music 보관함" / en: "Apple Music Library"
+  - `apple_music_permission_required` — ko: "Apple Music 보관함 접근 권한이 필요합니다" / en: "Apple Music library access is required"
+  - `apple_music_permission_denied` — ko: "권한이 거부되어 있습니다" / en: "Permission denied"
+  - `apple_music_open_settings` — ko: "설정 열기" / en: "Open Settings"
+- [ ] **Step 4**: 이후 Task들은 인라인 문자열 대신 `Text("apple_music_picker_title")` 같은 키 호출 사용. 에러 메시지·토스트 등 새로 생기는 문자열은 즉시 Catalog에 추가.
+- [ ] **Step 5**: 기존 앱의 인라인 한국어(Constants.swift 등)는 이번 PR 범위 외 — 후속 cleanup.
+- [ ] **Step 6**: 빌드 성공 + 앱 실행해 시뮬레이터 언어 바꿔 가며 한/영 표시 확인.
+- [ ] **Step 7**: 커밋 `chore(l10n): add Localizable.xcstrings with initial Apple Music strings`.
+
 ## Task 1: project.yml 권한 키
 
 **Files**: Modify `project.yml`
@@ -357,17 +375,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
           reader.add(output); reader.startReading()
           let dest = tmpDir.appendingPathComponent("\(persistentID).wav")
           try? FileManager.default.removeItem(at: dest)
-          let fmt = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+          // AVAssetReaderTrackOutput의 16-bit interleaved PCM 출력과 포맷 일치 필수.
+          // standardFormatWithSampleRate는 non-interleaved Float32이라 호환 안 됨.
+          guard let fmt = AVAudioFormat(commonFormat: .pcmFormatInt16,
+              sampleRate: 44_100, channels: 2, interleaved: true)
+          else { throw Err.decodingFailed }
           let file = try AVAudioFile(forWriting: dest, settings: fmt.settings)
+          let bytesPerFrame = Int(fmt.streamDescription.pointee.mBytesPerFrame)
           while reader.status == .reading, let sb = output.copyNextSampleBuffer() {
               guard let block = CMSampleBufferGetDataBuffer(sb) else { continue }
               var len = 0; var ptr: UnsafeMutablePointer<Int8>?
               if CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil,
                   totalLengthOut: &len, dataPointerOut: &ptr) == noErr, let ptr {
-                  let frames = AVAudioFrameCount(len / 4)
+                  let frames = AVAudioFrameCount(len / bytesPerFrame)
                   if let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames) {
                       buf.frameLength = frames
-                      memcpy(buf.int16ChannelData?[0], ptr, len)
+                      if let dest = buf.int16ChannelData?[0] {
+                          memcpy(dest, ptr, len)
+                      }
                       try file.write(from: buf)
                   }
               }
@@ -399,14 +424,37 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild \
 
 ## Task 8: PlayerView 진입 버튼 + 단일 트랙 로드 파이프라인
 
-**Files**: Modify `Cadenza/Views/PlayerView.swift`
+**Files**: Modify `Cadenza/CadenzaApp.swift`, `Cadenza/Views/PlayerView.swift`
 
-- [ ] **Step 1**: State와 dependencies:
+SwiftUI View는 value type이라 View struct에 직접 `AssetResolver()`를 들면 뷰 재생성 시 캐시가 리셋될 수 있다. **App 레벨에서 소유**하고 주입한다. (PR 3에서도 Queue가 같은 인스턴스를 공유해야 tmp WAV 캐시가 의미 있음.)
+
+- [ ] **Step 1**: `CadenzaApp.swift`에 안정 수명의 리소스 보유:
   ```swift
-  @State private var showAppleMusicPicker = false
-  private let musicLibrary: MusicLibrary = MusicLibraryService()
-  private let assetResolver = AssetResolver()
+  @main
+  struct CadenzaApp: App {
+      @StateObject private var audio = AudioManager()
+      // App 구조체는 SwiftUI가 앱 수명 동안 유지하므로 let 소유가 안전.
+      private let musicLibrary: MusicLibrary = MusicLibraryService()
+      private let assetResolver = AssetResolver()
+
+      var body: some Scene {
+          WindowGroup {
+              PlayerView(audio: audio, musicLibrary: musicLibrary, assetResolver: assetResolver)
+          }
+      }
+  }
   ```
+- [ ] **Step 2**: PlayerView가 주입 받도록 변경:
+  ```swift
+  struct PlayerView: View {
+      @ObservedObject var audio: AudioManager
+      let musicLibrary: MusicLibrary
+      let assetResolver: AssetResolver
+      @State private var showAppleMusicPicker = false
+      // ...
+  }
+  ```
+  기존 PlayerView 초기화 지점(Preview 포함)도 새 시그니처에 맞춰 업데이트.
 - [ ] **Step 2**: 기존 파일 피커 옆에 버튼:
   ```swift
   Button("Apple Music 가져오기") { showAppleMusicPicker = true }
