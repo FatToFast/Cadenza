@@ -53,8 +53,8 @@ PlayerView
         ├─ file URL → passthrough
         └─ ipod-library URL → AVAssetReader → tmp/<hash>.wav (N+1 eviction)
      MusicLibraryService (프로토콜 `MusicLibrary` 주입)
-        ├─ MusicAuthorization (iOS 16+)
-        └─ MPMediaQuery (assetURL 취득용)
+        ├─ MPMediaLibrary.requestAuthorization (MediaPlayer 보관함 권한)
+        └─ MPMediaQuery (플레이리스트·트랙·assetURL 취득)
 ```
 
 ### 핵심 타입
@@ -97,10 +97,15 @@ struct NowPlayingInfo: Sendable {
 }
 
 protocol MusicLibrary: Sendable {
-    func requestAuthorization() async -> MusicAuthorization.Status
+    func authorizationStatus() -> MPMediaLibraryAuthorizationStatus
+    func requestAuthorization() async -> MPMediaLibraryAuthorizationStatus
     func fetchPlaylists() async throws -> [PlaylistSummary]
     func fetchItems(in playlistID: UInt64) async throws -> [QueueItem]
 }
+
+// 권한 API 주의: MPMediaQuery를 데이터 소스로 쓰므로
+// MPMediaLibrary.requestAuthorization()이 정답. MusicKit의 MusicAuthorization은
+// MusicKit 전용 API (MusicLibraryRequest 등)를 쓸 때만 필요하며 본 설계는 쓰지 않음.
 
 actor AssetResolver {
     func resolve(_ item: QueueItem) async throws -> URL
@@ -183,7 +188,8 @@ prefetch(at:):
 
 | 상황 | 처리 | UI |
 |---|---|---|
-| 권한 거부 | 버튼 비활성 상태 | 설명 + "설정 열기" 시트 |
+| 권한 `denied`/`restricted` | 버튼 비활성 상태 | 설명 + "설정 열기" 시트 (iOS 설정 딥링크) |
+| 권한 `notDetermined` | 버튼 탭 시 시스템 권한 팝업 (`MPMediaLibrary.requestAuthorization`) | 허용 시 플레이리스트 로드, 거부 시 위 행으로 |
 | 보관함 비어있음 | 피커 초기 상태 | "보관함이 비어있습니다" |
 | 플레이리스트 모두 cloud-only | 큐 구성 안 함 | "재생 가능한 곡이 없습니다. 다운로드 후 재시도" |
 | 특정 곡 assetURL nil | QueueItem.unplayableReason = .cloudOnly | 큐 아이템에 구름 아이콘 |
@@ -200,10 +206,91 @@ prefetch(at:):
 
 ## 백그라운드·잠금화면
 
-- `Info.plist` → `UIBackgroundModes: [audio]` 엔트리 추가
-- `AVAudioSession.Category.playback` — 기존 설정 그대로
-- `MPNowPlayingInfoCenter.default().nowPlayingInfo` — 현재 곡 메타데이터
+### 빌드 설정 (`project.yml`) 변경
+
+본 프로젝트는 `GENERATE_INFOPLIST_FILE: true`로 Info.plist를 생성한다. 따라서 직접 plist 파일을 편집하지 않고 `project.yml`의 타겟 settings에 `INFOPLIST_KEY_*` 를 추가한다.
+
+```yaml
+targets:
+  Cadenza:
+    settings:
+      base:
+        INFOPLIST_KEY_NSAppleMusicUsageDescription: "메트로놈에 맞춰 재생할 Apple Music 보관함 곡을 불러옵니다."
+        INFOPLIST_KEY_UIBackgroundModes: audio
+        # 기존 키는 유지
+```
+
+`INFOPLIST_KEY_UIBackgroundModes` 는 xcodegen이 배열로 변환해 `UIBackgroundModes: [audio]` 로 plist에 들어간다. 추가 모드가 필요해지면 `"audio mixed-audio"` 처럼 공백 구분.
+
+### 런타임 동작
+- `AVAudioSession.Category.playback` — 기존 설정 그대로 (SPEC.md §1.1에 따라 이미 선언됨)
+- `MPNowPlayingInfoCenter.default().nowPlayingInfo` — 현재 곡 메타데이터, 큐 전환 시 업데이트
 - `MPRemoteCommandCenter.shared()` — play/pause/next/prev 원격 명령을 Queue 액션에 바인딩
+
+### SPEC.md §1.5와의 관계 (세션 공존)
+
+SPEC.md §1.5는 v1 가설로 `ApplicationMusicPlayer` + `.mixWithOthers` 기반 세션 공존을 기록했다. 본 설계는 PCM 추출로 전환하면서 **이 가설을 폐기한다**. 이유:
+- `ApplicationMusicPlayer`는 `AVAudioEngine`과 독립 출력이라 메트로놈과의 **샘플 정확도 동기 불가**
+- 템포 변경(time-stretching)이 ApplicationMusicPlayer에 직접 노출되지 않음
+- 본 프로젝트의 핵심 기능(메트로놈 동기 + 템포 변경)을 위해 PCM 레벨 접근 필수
+
+대신 모든 오디오는 앱의 단일 `AVAudioEngine`으로 흐른다. `.mixWithOthers` 옵션은 사용하지 않는다. SPEC.md §1.5는 본 설계 머지 후 후속 커밋에서 업데이트한다.
+
+## 분석 캐시 identity (BeatAlignmentAnalyzer 확장)
+
+### 문제
+현재 `BeatAlignmentAnalyzer.loadOrAnalyze(url:expectedBPM:)`는 내부에서 URL path + 파일 fingerprint(size + modifiedAt + duration)로 캐시 키를 만든다. Apple Music 트랙은 매번 다른 tmp WAV로 export되므로 fingerprint가 매번 달라져 **cache miss 상시 발생**. manualNudge 영속성도 같은 이유로 유지 안 됨.
+
+### 해결
+`BeatAlignmentAnalyzer`에 **논리 캐시 키**를 명시적으로 받는 오버로드 추가:
+
+```swift
+enum BeatAlignmentAnalyzer {
+    // 기존 API (파일 URL 기반, 그대로 유지)
+    static func loadOrAnalyze(url: URL, expectedBPM: Double?) throws -> BeatAlignmentLoadResult
+
+    // 신규: 논리 키 기반
+    static func loadOrAnalyze(
+        url: URL,
+        cacheIdentity: String,   // 예: "applemusic-\(persistentID)"
+        expectedBPM: Double?
+    ) throws -> BeatAlignmentLoadResult
+}
+```
+
+신규 오버로드 동작:
+- cache 키로 `cacheIdentity` 사용 (URL hash 대신)
+- fingerprint 대신 `cacheIdentity` 일치 여부만 확인 — tmp 파일 재생성되어도 hit
+- 저장은 기존 `BeatAlignmentCache` 하위에 다른 파일명 스킴 사용: `cacheIdentity` SHA256 → `.json`
+
+### QueueItem 확장
+```swift
+struct QueueItem {
+    var analysisCacheIdentity: String {
+        switch source {
+        case .file(let url): return "file-\(url.path)"     // 기존 동작과 호환
+        case .appleMusic(let persistentID, _): return "applemusic-\(persistentID)"
+        }
+    }
+}
+```
+
+AudioManager.loadFile이 큐 경로일 때 해당 identity를 analyzer로 전달. 파일 피커 경로는 기존 API(URL 기반) 그대로 호출 — 기존 캐시 유효성 유지.
+
+### ManualNudge 영속성
+`updateManualNudge` 함수도 동일한 분기 필요:
+```swift
+static func updateManualNudge(
+    _ manualNudge: TimeInterval,
+    cacheIdentity: String,
+    analysis: BeatAlignmentAnalysis
+) throws -> BeatAlignmentAnalysis
+```
+
+Apple Music 트랙의 수동 beat 보정이 세션을 넘어 `persistentID` 기반으로 유지된다.
+
+### AudioManager 배선
+`loadFile(url:generation:)`에 `analysisIdentity: String?` 파라미터 추가. nil이면 기존 URL 기반 API 사용 (파일 피커 호환), 값 있으면 논리 키 API 사용. Queue 경로만 identity 전달.
 
 ## AssetResolver 캐시 정책
 
@@ -259,6 +346,22 @@ Tests/
 - 구독 만료는 테스트 플래그로 에러 분기 트리거
 
 ## 작업 분할
+
+**PR 0 — Spike: Apple Music 라이브러리 트랙 PCM 추출 검증** (실기기 필수)
+
+본 설계는 SPEC.md §1.5의 ApplicationMusicPlayer 방향을 폐기하고 PCM 추출 쪽으로 선회한다. 이 선회가 실현 가능한지 **본 구현 시작 전에 실기기에서 검증**해야 한다.
+
+- 검증 시나리오:
+  1. Apple Music 구독 계정으로 실기기에서 앱 실행
+  2. 임의 보관함 곡 1개를 "기기에 다운로드" 상태로 두기
+  3. `MPMediaLibrary.requestAuthorization` → `MPMediaQuery.songs().items?.first { $0.assetURL != nil }` 로 곡 찾기
+  4. 해당 `assetURL`로 `AVURLAsset` 생성 → `AVAssetReader`로 PCM 읽기 시도
+  5. 성공하면 임시 WAV 생성 후 `AVAudioFile(forReading:)` 로드 확인
+- 성공 조건: 오디오 샘플을 실제로 읽고, BeatAlignmentAnalyzer가 값 반환
+- 실패 조건: DRM 에러, assetURL 접근 불가, 재생 중단 등
+- 결과물: 짧은 개발 브랜치에 spike 스크립트/테스트 코드, 결과 노트
+- spike 성공 → PR 1로 진행
+- spike 실패 → 설계 재검토 (ApplicationMusicPlayer 방향으로 재선회 또는 범위 축소)
 
 **PR 1 — 인프라 리팩터 (외부 동작 변경 없음)**
 - `QueueItem`, `NowPlayingInfo`, `PlaybackEndBehavior` 타입 도입
@@ -325,7 +428,12 @@ Queue의 `isActive = true` 직후 첫 `playCurrent()`는 `resolve` 대기 중이
 동작: 기존 크기 1 큐(파일 A)가 **플레이리스트 B 큐로 대체**된다. A 재생은 즉시 멈추고, B의 첫 재생 가능한 트랙이 load·play된다. 사용자가 실수를 방지할 수 있도록 피커 확정 직전에 "현재 재생 중지됩니다" 안내를 **표시하지 않는다 (v1)** — 일반 음악 앱 관례상 새 선택은 대체 동작이 자연스러움.
 
 ### 로컬라이제이션 컨벤션
-v1은 **한국어 단일 언어**. 문자열 리소스 추출(Localizable.strings) 없이 인라인 한국어 유지. 기존 코드베이스(`Constants.swift`, `AudioManager.swift`, `PlaybackModels.swift`)가 동일 패턴이라 일관성 유지 목적. i18n은 v2 이후 과제.
+DESIGN.md §6에 따라 **한국어 + 영어 병행, iOS 17+ String Catalog(`.xcstrings`) 사용**. 본 기능에서 새로 추가되는 모든 사용자 노출 문자열(UI 라벨, 에러 메시지, 토스트, 권한 설명)은 **처음부터 String Catalog에 등록**한다.
+
+- `Localizable.xcstrings` 파일이 없다면 PR 1에서 함께 추가
+- 새 문자열은 Swift 코드에서 `Text("apple_music_picker_title")` 같은 키 호출 형태
+- Info.plist 권한 설명(`NSAppleMusicUsageDescription`)은 xcodegen settings에서 한국어 기본값 지정, 이후 String Catalog로 확장
+- 기존 인라인 한국어(Constants.swift 등) 마이그레이션은 본 설계 범위 외 (별도 작업)
 
 ### 테스트 케이스 구체 예시 (카테고리당 1개)
 
