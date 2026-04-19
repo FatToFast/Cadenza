@@ -127,6 +127,16 @@ final class AudioManager: ObservableObject {
         audioFile == nil && (state == .playing || state == .paused) && metronomeEnabled
     }
 
+    var currentNowPlayingInfo: NowPlayingInfo {
+        NowPlayingInfo(
+            title: trackTitle, artist: trackArtist,
+            originalBPM: originalBPM, originalBPMSource: originalBPMSource,
+            playbackProgress: trackDuration > 0 ? currentPlaybackTime / trackDuration : 0,
+            playbackDuration: trackDuration,
+            queueContext: nil
+        )
+    }
+
     // MARK: - Private
 
     private let engine = AVAudioEngine()
@@ -162,6 +172,9 @@ final class AudioManager: ObservableObject {
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
     private var cachedMetronomeDelay: TimeInterval?
+    private var trackGeneration: Int = 0
+    let trackEndedSubject = PassthroughSubject<Void, Never>()
+    @Published var playbackEndBehavior: PlaybackEndBehavior = .loop
 
     // MARK: - Init
 
@@ -286,6 +299,13 @@ final class AudioManager: ObservableObject {
     // MARK: - File Loading
 
     func loadFile(url: URL) async {
+        trackGeneration += 1
+        let gen = trackGeneration
+        await loadFile(url: url, generation: gen)
+    }
+
+    private func loadFile(url: URL, generation: Int) async {
+        self.trackGeneration = generation
         // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.
         defer { pendingPresetBPMHint = nil }
         // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
@@ -515,6 +535,7 @@ final class AudioManager: ObservableObject {
         currentScheduledStartFrame = startFrame
         scheduledLoopStartFrame = 0
 
+        let capturedGeneration = self.trackGeneration
         playerNode.scheduleSegment(
             file,
             startingFrame: startFrame,
@@ -522,20 +543,29 @@ final class AudioManager: ObservableObject {
             at: nil
         ) { [weak self] in
             Task { @MainActor in
-                guard let self, self.state == .playing else {
-                    self?.isScheduling = false
-                    self?.hasScheduledPlayback = false
+                guard let self else { return }
+                guard self.trackGeneration == capturedGeneration else { return } // stale drop
+                guard self.state == .playing else {
+                    self.isScheduling = false
+                    self.hasScheduledPlayback = false
                     return
                 }
                 self.currentPlaybackTime = 0
                 self.isScheduling = false
                 self.hasScheduledPlayback = false
                 self.currentScheduledStartFrame = 0
-                self.scheduleLoop()
-                if self.metronomeEnabled {
-                    self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
+                switch self.playbackEndBehavior {
+                case .loop:
+                    self.scheduleLoop()
+                    if self.metronomeEnabled {
+                        self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
+                    }
+                    logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
+                case .notify:
+                    self.state = .paused
+                    self.trackEndedSubject.send(())
+                    logger.debug("Track ended, notify (gen=\(capturedGeneration))")
                 }
-                logger.debug("Loop: re-scheduled from completion handler")
             }
         }
     }

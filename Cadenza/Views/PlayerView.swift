@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 /// 메인 플레이어 화면 (DESIGN.md 2.1)
 struct PlayerView: View {
     @EnvironmentObject private var audio: AudioManager
+
+    private var nowPlaying: NowPlayingInfo { audio.currentNowPlayingInfo }
+
     @State private var showFilePicker = false
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
@@ -30,9 +33,9 @@ struct PlayerView: View {
                         // BPM 디스플레이
                         BPMDisplayView(
                             targetBPM: audio.targetBPM,
-                            originalBPM: audio.originalBPM,
+                            originalBPM: nowPlaying.originalBPM,
                             playbackRate: audio.playbackRate,
-                            originalBPMSource: audio.originalBPMSource
+                            originalBPMSource: nowPlaying.originalBPMSource
                         )
                         .padding(.vertical, 16)
 
@@ -125,7 +128,7 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var trackInfoSection: some View {
-        if let title = audio.trackTitle {
+        if let title = nowPlaying.title {
             // 곡 로드됨
             VStack(spacing: 6) {
                 Text(title)
@@ -134,7 +137,7 @@ struct PlayerView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
 
-                if let artist = audio.trackArtist {
+                if let artist = nowPlaying.artist {
                     Text(artist)
                         .font(.cadenzaBody)
                         .foregroundColor(.cadenzaTextSecondary)
@@ -219,7 +222,7 @@ struct PlayerView: View {
                     .disabled(!canApplyOriginalBPM)
             }
 
-            Text(audio.originalBPMSource.helperText)
+            Text(nowPlaying.originalBPMSource.helperText)
                 .font(.cadenzaCaption)
                 .foregroundColor(audio.needsOriginalBPMInput ? .cadenzaWarning : .cadenzaTextSecondary)
         }
@@ -229,7 +232,7 @@ struct PlayerView: View {
         VStack(spacing: 10) {
             Slider(
                 value: Binding(
-                    get: { isSeekingPlayback ? seekPreviewProgress : audio.playbackProgress },
+                    get: { isSeekingPlayback ? seekPreviewProgress : nowPlaying.playbackProgress },
                     set: { seekPreviewProgress = $0 }
                 ),
                 in: 0...1,
@@ -242,14 +245,14 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
                 Spacer()
-                Text(formattedTime(audio.trackDuration))
+                Text(formattedTime(nowPlaying.playbackDuration))
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextTertiary)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("재생 진행")
-        .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(audio.trackDuration))")
+        .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(nowPlaying.playbackDuration))")
     }
 
     private var syncDebugSection: some View {
@@ -526,7 +529,7 @@ struct PlayerView: View {
 
     private var displayedPlaybackTime: TimeInterval {
         guard isSeekingPlayback else { return audio.currentPlaybackTime }
-        return audio.trackDuration * seekPreviewProgress
+        return nowPlaying.playbackDuration * seekPreviewProgress
     }
 
     private func handleSeekEditingChanged(_ isEditing: Bool) {
