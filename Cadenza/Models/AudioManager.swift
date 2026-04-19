@@ -162,6 +162,7 @@ final class AudioManager: ObservableObject {
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
     private var cachedMetronomeDelay: TimeInterval?
+    private var trackGeneration: Int = 0
 
     // MARK: - Init
 
@@ -286,6 +287,13 @@ final class AudioManager: ObservableObject {
     // MARK: - File Loading
 
     func loadFile(url: URL) async {
+        trackGeneration += 1
+        let gen = trackGeneration
+        await loadFile(url: url, generation: gen)
+    }
+
+    func loadFile(url: URL, generation: Int) async {
+        self.trackGeneration = generation
         // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.
         defer { pendingPresetBPMHint = nil }
         // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
