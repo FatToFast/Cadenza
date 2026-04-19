@@ -523,6 +523,7 @@ final class AudioManager: ObservableObject {
         currentScheduledStartFrame = startFrame
         scheduledLoopStartFrame = 0
 
+        let capturedGeneration = self.trackGeneration
         playerNode.scheduleSegment(
             file,
             startingFrame: startFrame,
@@ -530,9 +531,11 @@ final class AudioManager: ObservableObject {
             at: nil
         ) { [weak self] in
             Task { @MainActor in
-                guard let self, self.state == .playing else {
-                    self?.isScheduling = false
-                    self?.hasScheduledPlayback = false
+                guard let self else { return }
+                guard self.trackGeneration == capturedGeneration else { return } // stale drop
+                guard self.state == .playing else {
+                    self.isScheduling = false
+                    self.hasScheduledPlayback = false
                     return
                 }
                 self.currentPlaybackTime = 0
@@ -543,7 +546,7 @@ final class AudioManager: ObservableObject {
                 if self.metronomeEnabled {
                     self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
                 }
-                logger.debug("Loop: re-scheduled from completion handler")
+                logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
             }
         }
     }
