@@ -163,6 +163,8 @@ final class AudioManager: ObservableObject {
     private var pendingPresetBPMHint: Double?
     private var cachedMetronomeDelay: TimeInterval?
     private var trackGeneration: Int = 0
+    let trackEndedSubject = PassthroughSubject<Void, Never>()
+    @Published var playbackEndBehavior: PlaybackEndBehavior = .loop
 
     // MARK: - Init
 
@@ -542,11 +544,17 @@ final class AudioManager: ObservableObject {
                 self.isScheduling = false
                 self.hasScheduledPlayback = false
                 self.currentScheduledStartFrame = 0
-                self.scheduleLoop()
-                if self.metronomeEnabled {
-                    self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
+                switch self.playbackEndBehavior {
+                case .loop:
+                    self.scheduleLoop()
+                    if self.metronomeEnabled {
+                        self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
+                    }
+                    logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
+                case .notify:
+                    self.trackEndedSubject.send(())
+                    logger.debug("Track ended, notify (gen=\(capturedGeneration))")
                 }
-                logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
             }
         }
     }
