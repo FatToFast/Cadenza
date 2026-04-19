@@ -19,10 +19,12 @@
 		A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */; };
 		AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */; };
 		AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498EA72F6CA1930D69CB9A0B /* PlayerView.swift */; };
+		AF592E8D64596D612783ABBD /* NowPlayingInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B066DF4A31066DC1B6AD6C18 /* NowPlayingInfo.swift */; };
 		AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */; };
 		B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */; };
 		DC62EA8D2AB4222F5B244C3B /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC55B62D7D30E7543446A624 /* QueueItem.swift */; };
 		F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */; };
+		F9FD6E7EB5DD54DBD0633B67 /* NowPlayingInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 997835964EA4195CD8E9EC1A /* NowPlayingInfoTests.swift */; };
 		FF5D37C411CB473DD5D84C27 /* BPMSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */; };
 /* End PBXBuildFile section */
 
@@ -48,9 +50,11 @@
 		6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensatorTests.swift; sourceTree = "<group>"; };
 		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
 		81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMSliderView.swift; sourceTree = "<group>"; };
+		997835964EA4195CD8E9EC1A /* NowPlayingInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingInfoTests.swift; sourceTree = "<group>"; };
 		9F48386185F7E37392C33B0A /* CadenzaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CadenzaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackEndBehavior.swift; sourceTree = "<group>"; };
 		AC55B62D7D30E7543446A624 /* QueueItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueItem.swift; sourceTree = "<group>"; };
+		B066DF4A31066DC1B6AD6C18 /* NowPlayingInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingInfo.swift; sourceTree = "<group>"; };
 		B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatAlignmentAnalyzer.swift; sourceTree = "<group>"; };
 		B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensator.swift; sourceTree = "<group>"; };
 		D32E8307CA39DD324E6A03F0 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
@@ -93,6 +97,7 @@
 			isa = PBXGroup;
 			children = (
 				D32E8307CA39DD324E6A03F0 /* AudioManager.swift */,
+				B066DF4A31066DC1B6AD6C18 /* NowPlayingInfo.swift */,
 				AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */,
 				AC55B62D7D30E7543446A624 /* QueueItem.swift */,
 			);
@@ -121,6 +126,7 @@
 			children = (
 				59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */,
 				6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */,
+				997835964EA4195CD8E9EC1A /* NowPlayingInfoTests.swift */,
 				680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */,
 				5DC304C833D5742B8B1CCF5A /* QueueItemTests.swift */,
 			);
@@ -245,6 +251,7 @@
 				78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */,
 				86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */,
 				86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */,
+				AF592E8D64596D612783ABBD /* NowPlayingInfo.swift in Sources */,
 				A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */,
 				AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */,
 				AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */,
@@ -258,6 +265,7 @@
 			files = (
 				0C71CE4FFC6FC8B69091148F /* BeatOffsetRefinementTests.swift in Sources */,
 				425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */,
+				F9FD6E7EB5DD54DBD0633B67 /* NowPlayingInfoTests.swift in Sources */,
 				280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */,
 				773C08FB89A01AA0AE2D0A7F /* QueueItemTests.swift in Sources */,
 			);
