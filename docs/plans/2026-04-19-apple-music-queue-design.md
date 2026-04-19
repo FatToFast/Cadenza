@@ -137,14 +137,14 @@ enum PlaybackEndBehavior { case loop, notify }
 ### 재생 시작 → 자동 전진
 
 1. 사용자가 "Apple Music 가져오기" tap
-2. `MusicAuthorization.request()` — 최초 1회 권한 시스템 팝업
-3. granted → `MusicLibraryService.fetchPlaylists()` → `AppleMusicLibraryView` 표시
+2. `MPMediaLibrary.requestAuthorization()` — 최초 1회 권한 시스템 팝업 (상태 `notDetermined`에서 진입)
+3. `.authorized` → `MusicLibraryService.fetchPlaylists()` → `AppleMusicLibraryView` 표시. `.denied`/`.restricted` → 설명 시트 + "설정 열기" 딥링크.
 4. 플레이리스트 선택 → `fetchItems(in:)` → 트랙 리스트 (cloud/downloaded 아이콘)
 5. 확정 → `PlaybackQueue.load(items:)` → `currentIndex = 0`, `isActive = true`
 6. `playCurrent()`:
    a. `trackGeneration` 증가
    b. `resolvedURL = await AssetResolver.resolve(item)`
-   c. `audio.loadFile(url: resolvedURL, generation: currentGen)`
+   c. `audio.loadFile(url: resolvedURL, generation: currentGen, analysisIdentity: item.analysisCacheIdentity)`
    d. `expectedRate = audio.targetBPM / audio.originalBPM`
    e. `expectedRate > rateHardCap` → item.unplayableReason = .rateOutOfRange → `advance()`
    f. `audio.play()`
@@ -176,11 +176,19 @@ prefetch(at:):
   prefetchTask?.cancel()
   prefetchTask = Task.detached {
     guard !Task.isCancelled else { return }
-    let url = try await resolver.resolve(items[at])
-    _ = try? BeatAlignmentAnalyzer.loadOrAnalyze(url: url, expectedBPM: nil)
-    // 분석 결과 JSON 캐시에 저장 → 다음 loadFile이 cache hit
+    let item = items[at]
+    let url = try await resolver.resolve(item)
+    _ = try? BeatAlignmentAnalyzer.loadOrAnalyze(
+      url: url,
+      cacheIdentity: item.analysisCacheIdentity,
+      expectedBPM: nil
+    )
+    // cacheIdentity 기반으로 JSON 캐시 저장 → 다음 playCurrent가 identity-aware
+    // 경로로 동일 cacheIdentity를 조회해 cache hit (tmp WAV 재생성돼도 유효).
   }
 ```
+
+`playCurrent`와 `prefetch` 둘 다 identity-aware 경로(`cacheIdentity:` 오버로드)를 사용한다. Queue 경로에서 legacy URL-only API를 호출하지 않는다.
 
 백그라운드 진입 시 **prefetch 취소하지 않음** (복귀 시 즉시 재생 우선).
 
@@ -371,16 +379,19 @@ Tests/
 - `AudioManagerGenerationTests` 신규 ~6개 + 기존 30개 테스트 회귀
 
 **PR 2 — Apple Music 읽기 전용**
-- `MusicLibraryService` + 프로토콜 + 주입
+- `MusicLibraryService` + 프로토콜 (`MPMediaLibrary.requestAuthorization` + `MPMediaQuery`) + 주입
 - `AssetResolver` actor + eviction
 - `AppleMusicLibraryView` 2-step 피커
-- 권한 거부 UX + `Info.plist` 업데이트
+- 권한 거부 UX (설정 딥링크 시트)
+- `project.yml`의 `INFOPLIST_KEY_NSAppleMusicUsageDescription` 추가 (Info.plist 직접 편집 안 함)
+- `BeatAlignmentAnalyzer`에 `cacheIdentity:` 오버로드 + `updateManualNudge(cacheIdentity:)` 추가
 - 단일 곡 선택 → 큐 크기 1 로드까지. 자동 전진 없음.
 
 **PR 3 — 큐 자동 전진 + prefetch + 잠금화면**
 - `PlaybackQueue` 전체 구현 (`advance`, `prefetch`, `trackEndedSubject` 구독)
 - `QueueBanner`, `QueueListView`
 - Rate cap 스킵, 연속 실패 처리
+- `project.yml`에 `INFOPLIST_KEY_UIBackgroundModes: audio` 추가 (백그라운드 재생용)
 - `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`
 
 ## 리스크 및 주의
