@@ -15,6 +15,7 @@
 		7CCD087ADED37595EFD55A1F /* BPMDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */; };
 		86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */; };
 		86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F8FFC774733449AD9A28B63 /* Constants.swift */; };
+		A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */; };
 		AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */; };
 		AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498EA72F6CA1930D69CB9A0B /* PlayerView.swift */; };
 		AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */; };
@@ -45,6 +46,7 @@
 		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
 		81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMSliderView.swift; sourceTree = "<group>"; };
 		9F48386185F7E37392C33B0A /* CadenzaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CadenzaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackEndBehavior.swift; sourceTree = "<group>"; };
 		B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatAlignmentAnalyzer.swift; sourceTree = "<group>"; };
 		B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensator.swift; sourceTree = "<group>"; };
 		D32E8307CA39DD324E6A03F0 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
@@ -87,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				D32E8307CA39DD324E6A03F0 /* AudioManager.swift */,
+				AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -236,6 +239,7 @@
 				78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */,
 				86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */,
 				86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */,
+				A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */,
 				AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */,
 				AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */,
 			);
