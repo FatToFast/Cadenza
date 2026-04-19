@@ -9,7 +9,7 @@ enum PlaybackState: String {
     case error
 }
 
-enum OriginalBPMSource: Equatable {
+enum OriginalBPMSource: Sendable, Equatable {
     case metadata
     case analysis
     case assumedDefault
