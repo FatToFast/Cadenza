@@ -34,6 +34,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private var bpmAnalysisTask: Task<Void, Never>?
     private var activePreviewAnalysisKey: String?
     private var failedPreviewAnalysisKeys: Set<String> = []
+    private var getSongBPMAttemptedKeys: Set<String> = []
     private var bpmCacheByKey: [String: StreamingBPMResult] = [:]
     private var didBuildBPMCache = false
     private var desiredPlaybackRate: Float = 1.0
@@ -416,17 +417,22 @@ final class AppleMusicStreamingController: ObservableObject {
         previewAssets: [PreviewAsset]?
     ) {
         let identityKey = songID.map(storeKey) ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
-        guard bpmCacheByKey[identityKey] == nil else { return }
+        let cachedResult = bpmCacheByKey[identityKey]
+        let shouldTryGetSongBPM = !getSongBPMAttemptedKeys.contains(identityKey)
+        guard cachedResult == nil || shouldTryGetSongBPM else { return }
         guard activePreviewAnalysisKey != identityKey else { return }
-        guard !failedPreviewAnalysisKeys.contains(identityKey) else { return }
+        guard shouldTryGetSongBPM || !failedPreviewAnalysisKeys.contains(identityKey) else { return }
         let previewAsset = previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil })
 
         activePreviewAnalysisKey = identityKey
+        if shouldTryGetSongBPM {
+            getSongBPMAttemptedKeys.insert(identityKey)
+        }
         logger.info("[preview_bpm] start title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) hasMusicKitPreview=\(previewAsset != nil)")
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = Task { @MainActor [weak self] in
             // Priority 1: GetSongBPM.com curated lookup (fast, high accuracy on slow tracks).
-            if let external = await GetSongBPMService.shared.lookupBPM(title: title, artist: artist) {
+            if shouldTryGetSongBPM, let external = await GetSongBPMService.shared.lookupBPM(title: title, artist: artist) {
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
                 let result = StreamingBPMResult(
@@ -446,6 +452,12 @@ final class AppleMusicStreamingController: ObservableObject {
                 }
                 self.activePreviewAnalysisKey = nil
                 self.logger.info("[getsongbpm] hit bpm=\(external.bpm) matched=\(external.matchedArtist, privacy: .public) title=\(title, privacy: .public)")
+                return
+            }
+
+            guard cachedResult == nil else {
+                guard let self else { return }
+                self.activePreviewAnalysisKey = nil
                 return
             }
 

@@ -170,10 +170,23 @@ struct AppleMusicStreamingPlaylistView: View {
         guard entriesByPlaylist[playlist.id] == nil else { return }
         do {
             let detailedPlaylist = try await playlist.with(.entries)
-            entriesByPlaylist[playlist.id] = Array(detailedPlaylist.entries ?? [])
+            let entries = Array(detailedPlaylist.entries ?? [])
+            entriesByPlaylist[playlist.id] = entries
+            prefetchGetSongBPM(for: entries)
         } catch {
             entriesByPlaylist[playlist.id] = []
             errorMessage = "곡 목록을 불러오지 못했습니다: \(error.localizedDescription)"
+        }
+    }
+
+    private func prefetchGetSongBPM(for entries: [Playlist.Entry]) {
+        let lookups = entries.map {
+            GetSongBPMService.TrackLookup(title: $0.title, artist: $0.artistName)
+        }
+        guard !lookups.isEmpty else { return }
+
+        Task(priority: .utility) {
+            await GetSongBPMService.shared.prefetchBPMs(lookups)
         }
     }
 }

@@ -77,6 +77,24 @@ final class GetSongBPMServiceTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requestCount, 1, "second call should hit in-memory cache")
     }
 
+    func testPrefetchWarmsCacheForLaterLookup() async {
+        MockURLProtocol.stubResponse = Self.adeleHelloPayload
+        MockURLProtocol.requestCount = 0
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "test-key" }
+        )
+
+        await service.prefetchBPMs([
+            GetSongBPMService.TrackLookup(title: "Hello", artist: "Adele")
+        ])
+        XCTAssertEqual(MockURLProtocol.requestCount, 1)
+
+        let result = await service.lookupBPM(title: "Hello", artist: "Adele")
+        XCTAssertEqual(result?.bpm, 78)
+        XCTAssertEqual(MockURLProtocol.requestCount, 1, "lookup should use the prefetched cache result")
+    }
+
     func testNormalizationMatchesDespiteCasingAndAccents() async {
         MockURLProtocol.stubResponse = Self.adeleHelloPayload
         let service = GetSongBPMService(
@@ -86,6 +104,80 @@ final class GetSongBPMServiceTests: XCTestCase {
         // "adèle" should normalize to match "Adele" candidate artist name.
         let result = await service.lookupBPM(title: "hello", artist: "adèle")
         XCTAssertEqual(result?.bpm, 78)
+    }
+
+    func testFallsBackToPrimaryArtistWhenFeaturedArtistLookupHasNoResult() async {
+        MockURLProtocol.responseProvider = { request in
+            let lookup = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "lookup" })?
+                .value
+
+            if lookup == "song:Cry Me a River artist:Justin Timberlake" {
+                return Self.justinTimberlakeCryMeARiverPayload
+            }
+
+            return #"{"search":{"error":"no result"}}"#.data(using: .utf8)!
+        }
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "test-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Cry Me a River",
+            artist: "Justin Timberlake featuring Timbaland"
+        )
+
+        XCTAssertEqual(result?.bpm, 146)
+        XCTAssertEqual(result?.matchedArtist, "Justin Timberlake")
+        XCTAssertEqual(MockURLProtocol.requestCount, 2)
+    }
+
+    func testFallsBackToPrimaryArtistWhenAmpersandArtistLookupHasNoResult() async {
+        MockURLProtocol.responseProvider = { request in
+            let lookup = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "lookup" })?
+                .value
+
+            if lookup == "song:Cry Me a River artist:Justin Timberlake" {
+                return Self.justinTimberlakeCryMeARiverPayload
+            }
+
+            return #"{"search":{"error":"no result"}}"#.data(using: .utf8)!
+        }
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "test-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Cry Me a River",
+            artist: "Justin Timberlake & Timbaland"
+        )
+
+        XCTAssertEqual(result?.bpm, 146)
+        XCTAssertEqual(result?.matchedArtist, "Justin Timberlake")
+        XCTAssertEqual(MockURLProtocol.requestCount, 2)
+    }
+
+    func testUsesCuratedOverrideWithoutNetworkLookup() async {
+        MockURLProtocol.stubResponse = Self.sesRunningWithoutTempoPayload
+        MockURLProtocol.requestCount = 0
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "test-key" }
+        )
+
+        let result = await service.lookupBPM(title: "달리기", artist: "S.E.S.")
+
+        XCTAssertEqual(result?.bpm, 103)
+        XCTAssertEqual(result?.matchedArtist, "S.E.S.")
+        XCTAssertEqual(result?.matchedTitle, "달리기")
+        XCTAssertEqual(MockURLProtocol.requestCount, 0)
     }
 
     func testHttpErrorReturnsNil() async {
@@ -115,17 +207,33 @@ final class GetSongBPMServiceTests: XCTestCase {
        "artist":{"name":"Adele"}}
     ]}
     """#.data(using: .utf8)!
+
+    private static let justinTimberlakeCryMeARiverPayload: Data = #"""
+    {"search":[
+      {"id":"x1","title":"Cry Me a River","tempo":"146",
+       "artist":{"name":"Justin Timberlake"}}
+    ]}
+    """#.data(using: .utf8)!
+
+    private static let sesRunningWithoutTempoPayload: Data = #"""
+    {"search":[
+      {"id":"ses-running","title":"달리기","tempo":"",
+       "artist":{"name":"S.E.S."}}
+    ]}
+    """#.data(using: .utf8)!
 }
 
 // MARK: - MockURLProtocol
 
 final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var stubResponse: Data?
+    nonisolated(unsafe) static var responseProvider: ((URLRequest) -> Data?)?
     nonisolated(unsafe) static var stubStatusCode: Int = 200
     nonisolated(unsafe) static var requestCount: Int = 0
 
     static func reset() {
         stubResponse = nil
+        responseProvider = nil
         stubStatusCode = 200
         requestCount = 0
     }
@@ -146,7 +254,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
             headerFields: ["Content-Type": "application/json"]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if let data = MockURLProtocol.stubResponse {
+        if let data = MockURLProtocol.responseProvider?(request) ?? MockURLProtocol.stubResponse {
             client?.urlProtocol(self, didLoad: data)
         }
         client?.urlProtocolDidFinishLoading(self)
