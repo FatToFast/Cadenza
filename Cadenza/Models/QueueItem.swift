@@ -9,7 +9,7 @@ struct QueueItem: Identifiable, Sendable, Equatable {
 
     enum Source: Sendable, Equatable {
         case file(URL)
-        // .appleMusic는 PR 2에서 추가
+        case appleMusic(AppleMusicTrack)
     }
 
     enum UnplayableReason: Sendable, Equatable {
@@ -20,6 +20,7 @@ struct QueueItem: Identifiable, Sendable, Equatable {
     var analysisCacheIdentity: String {
         switch source {
         case .file(let url): return "file-\(url.path)"
+        case .appleMusic(let track): return track.id
         }
     }
 }

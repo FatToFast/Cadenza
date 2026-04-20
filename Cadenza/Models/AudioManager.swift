@@ -304,6 +304,27 @@ final class AudioManager: ObservableObject {
         await loadFile(url: url, generation: gen)
     }
 
+    func loadResolvedTrack(
+        url: URL,
+        title: String,
+        artist: String?,
+        bpmHint: Double?
+    ) async {
+        pendingPresetBPMHint = bpmHint
+        await loadFile(url: url)
+
+        if state == .ready {
+            trackTitle = title
+            trackArtist = artist
+            if let bpmHint, originalBPMSource == .assumedDefault {
+                originalBPM = bpmHint
+                _bpmFromMetadata = false
+                originalBPMSource = .metadata
+                updateRate()
+            }
+        }
+    }
+
     private func loadFile(url: URL, generation: Int) async {
         self.trackGeneration = generation
         // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.

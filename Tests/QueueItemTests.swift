@@ -14,6 +14,21 @@ final class QueueItemTests: XCTestCase {
         XCTAssertEqual(item.analysisCacheIdentity, "file-\(url.path)")
     }
 
+    func testAppleMusicSourceIdentityUsesStableTrackID() {
+        let track = AppleMusicTrack(
+            id: "am-42",
+            persistentID: 42,
+            title: "Song",
+            artist: "Artist",
+            albumTitle: "Album",
+            assetURL: URL(string: "ipod-library://item/item.mp3?id=42"),
+            beatsPerMinute: 172,
+            isCloudItem: false
+        )
+        let item = QueueItem(id: "x", title: "s", artist: nil, source: .appleMusic(track))
+        XCTAssertEqual(item.analysisCacheIdentity, "am-42")
+    }
+
     func testUnplayableReasonNilByDefault() {
         let item = QueueItem(id: "x", title: "s", artist: nil,
                              source: .file(URL(fileURLWithPath: "/tmp/a.mp3")))

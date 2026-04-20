@@ -1,13 +1,18 @@
+import MusicKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// 메인 플레이어 화면 (DESIGN.md 2.1)
 struct PlayerView: View {
     @EnvironmentObject private var audio: AudioManager
+    @StateObject private var streaming = AppleMusicStreamingController()
 
     private var nowPlaying: NowPlayingInfo { audio.currentNowPlayingInfo }
 
     @State private var showFilePicker = false
+    @State private var showAppleMusicPicker = false
+    @State private var showAppleMusicStreamingSearch = false
+    @State private var isImportingAppleMusic = false
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
     @State private var isSeekingPlayback = false
@@ -49,7 +54,7 @@ struct PlayerView: View {
                         )
                             .padding(.horizontal, 20)
 
-                        if audio.hasLoadedTrack {
+                        if audio.hasLoadedTrack && !streaming.hasSong {
                             Divider().background(Color.cadenzaDivider)
 
                             playbackProgressSection
@@ -100,6 +105,17 @@ struct PlayerView: View {
         ) { result in
             handleFileSelection(result)
         }
+        .sheet(isPresented: $showAppleMusicPicker) {
+            AppleMusicLibraryView { track in
+                loadAppleMusicTrack(track)
+            }
+            .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showAppleMusicStreamingSearch) {
+            AppleMusicStreamingSearchView { song in
+                playAppleMusicStream(song)
+            }
+        }
         .onAppear(perform: syncOriginalBPMText)
         .onChange(of: audio.originalBPM) { _, _ in
             syncOriginalBPMText()
@@ -107,6 +123,16 @@ struct PlayerView: View {
         .onChange(of: audio.playbackProgress) { _, newValue in
             guard !isSeekingPlayback else { return }
             seekPreviewProgress = newValue
+        }
+        .onChange(of: audio.playbackRate) { _, newValue in
+            if streaming.hasSong {
+                streaming.applyPlaybackRate(newValue)
+            }
+        }
+        .onChange(of: streaming.errorMessage) { _, message in
+            if let message {
+                audio.presentError(message)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: audio.state)
         .animation(.easeInOut(duration: 0.3), value: audio.errorMessage)
@@ -128,7 +154,32 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var trackInfoSection: some View {
-        if let title = nowPlaying.title {
+        if let streamingTitle = streaming.title {
+            VStack(spacing: 6) {
+                Text(streamingTitle)
+                    .font(.cadenzaTitle2)
+                    .foregroundColor(.cadenzaTextPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+
+                if let artist = streaming.artist {
+                    Text(artist)
+                        .font(.cadenzaBody)
+                        .foregroundColor(.cadenzaTextSecondary)
+                        .lineLimit(1)
+                }
+
+                Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaWarning)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.cadenzaWarning.opacity(0.15))
+                    .clipShape(Capsule())
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 20)
+        } else if let title = nowPlaying.title {
             // 곡 로드됨
             VStack(spacing: 6) {
                 Text(title)
@@ -346,8 +397,8 @@ struct PlayerView: View {
     private var playbackControls: some View {
         VStack(spacing: 16) {
             // 재생/정지 버튼 — 큰 버튼, 엄지 도달 영역 (DESIGN.md 2.1)
-            Button(action: { audio.togglePlayPause() }) {
-                Image(systemName: audio.state == .playing ? "pause.fill" : "play.fill")
+            Button(action: handlePrimaryPlayback) {
+                Image(systemName: primaryPlaybackIcon)
                     .font(.system(size: 36))
                     .foregroundColor(.cadenzaBackground)
                     .frame(width: 80, height: 80)
@@ -357,7 +408,7 @@ struct PlayerView: View {
                     .clipShape(Circle())
             }
             .disabled(!isPlayable)
-            .accessibilityLabel(audio.state == .playing ? "정지" : "재생")
+            .accessibilityLabel(primaryPlaybackLabel)
 
             if audio.metronomeEnabled {
                 Label("메트로놈 동작 중", systemImage: "metronome")
@@ -368,6 +419,7 @@ struct PlayerView: View {
             // 파일 선택
             Button(action: {
                 audio.clearError()
+                streaming.stop()
                 showFilePicker = true
             }) {
                 Label("파일 선택", systemImage: "folder")
@@ -378,9 +430,37 @@ struct PlayerView: View {
             .opacity(audio.state == .playing ? 0.4 : 1.0)
             .accessibilityLabel("파일 선택")
 
+            Button(action: {
+                audio.clearError()
+                streaming.stop()
+                showAppleMusicPicker = true
+            }) {
+                Label(
+                    isImportingAppleMusic ? "Apple Music 불러오는 중" : "Apple Music 보관함",
+                    systemImage: "music.note.list"
+                )
+                .font(.cadenzaBody)
+                .foregroundColor(.cadenzaAccent)
+            }
+            .disabled(audio.state == .playing || isImportingAppleMusic)
+            .opacity(audio.state == .playing || isImportingAppleMusic ? 0.4 : 1.0)
+            .accessibilityLabel("Apple Music 보관함")
+
+            Button(action: {
+                audio.clearError()
+                showAppleMusicStreamingSearch = true
+            }) {
+                Label("Apple Music 스트리밍", systemImage: "cloud")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaAccent)
+            }
+            .disabled(audio.state == .playing || streaming.isLoading)
+            .opacity(audio.state == .playing || streaming.isLoading ? 0.4 : 1.0)
+            .accessibilityLabel("Apple Music 스트리밍")
+
             sampleTrackButtons
 
-            Text("지원 형식: mp3, m4a, wav")
+            Text("파일/다운로드 곡은 피치락, 스트리밍 곡은 Apple Music 플레이어로 재생")
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextTertiary)
         }
@@ -418,6 +498,12 @@ struct PlayerView: View {
     }
 
     private var isPlayable: Bool {
+        if streaming.isLoading {
+            return false
+        }
+        if streaming.hasSong {
+            return true
+        }
         switch audio.state {
         case .ready, .paused, .playing:
             return true
@@ -461,6 +547,7 @@ struct PlayerView: View {
         case .success(let urls):
             guard let url = urls.first else { return }
             audio.clearError()
+            streaming.stop()
             Task {
                 await audio.loadFile(url: url)
             }
@@ -473,9 +560,64 @@ struct PlayerView: View {
 
     private func loadSampleTrack(_ preset: SampleTrackPreset = .clickLoop) {
         audio.clearError()
+        streaming.stop()
         Task {
             await audio.loadSampleTrack(preset)
         }
+    }
+
+    private func loadAppleMusicTrack(_ track: AppleMusicTrack) {
+        audio.clearError()
+        streaming.stop()
+        isImportingAppleMusic = true
+        Task {
+            do {
+                let resolvedURL = try await AssetResolver.shared.resolve(track)
+                await audio.loadResolvedTrack(
+                    url: resolvedURL,
+                    title: track.title,
+                    artist: track.artist,
+                    bpmHint: track.beatsPerMinute.map(Double.init)
+                )
+            } catch {
+                audio.presentError(error.localizedDescription)
+            }
+            isImportingAppleMusic = false
+        }
+    }
+
+    private func playAppleMusicStream(_ song: Song) {
+        audio.clearError()
+        if audio.state == .playing {
+            audio.pause()
+        }
+        Task {
+            await streaming.play(song, playbackRate: audio.playbackRate)
+        }
+    }
+
+    private func handlePrimaryPlayback() {
+        if streaming.hasSong {
+            Task {
+                await streaming.togglePlayback(playbackRate: audio.playbackRate)
+            }
+        } else {
+            audio.togglePlayPause()
+        }
+    }
+
+    private var primaryPlaybackIcon: String {
+        if streaming.hasSong {
+            return streaming.isPlaying ? "pause.fill" : "play.fill"
+        }
+        return audio.state == .playing ? "pause.fill" : "play.fill"
+    }
+
+    private var primaryPlaybackLabel: String {
+        if streaming.hasSong {
+            return streaming.isPlaying ? "Apple Music 일시정지" : "Apple Music 재생"
+        }
+        return audio.state == .playing ? "정지" : "재생"
     }
 
     private var canApplyOriginalBPM: Bool {
