@@ -25,7 +25,7 @@ enum BPMRange {
 
 enum MetronomeDefaults {
     static let enabled = true
-    static let volume: Float = 0.6
+    static let volume: Float = 0.28
     static let beatsPerBar = 4
 }
 

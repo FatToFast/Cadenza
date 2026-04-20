@@ -69,6 +69,10 @@ struct BPMDisplayView: View {
             return Color.cadenzaAccent.opacity(0.72)
         case .manual:
             return .cadenzaTextSecondary
+        case .streamingGuide:
+            return .cadenzaWarning
+        case .streamingAnchor:
+            return .cadenzaAccent
         }
     }
 }

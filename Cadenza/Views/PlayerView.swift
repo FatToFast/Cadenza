@@ -17,6 +17,9 @@ struct PlayerView: View {
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
     @State private var isSeekingPlayback = false
+    @State private var streamingAnchorOffset: TimeInterval?
+    @State private var streamingAnchorTapTimes: [TimeInterval] = []
+    private let streamingAnchorStore = StreamingBeatAnchorStore()
 
     var body: some View {
         ZStack {
@@ -142,6 +145,14 @@ struct PlayerView: View {
         .onChange(of: streaming.isPlaying) { _, _ in
             syncStreamingMetronome()
         }
+        .onChange(of: streaming.title) { _, _ in
+            refreshStreamingAnchorForCurrentTrack()
+            applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: streaming.artist) { _, _ in
+            refreshStreamingAnchorForCurrentTrack()
+            applyStreamingTempoAndAlignment()
+        }
         .onChange(of: streaming.errorMessage) { _, message in
             if let message {
                 audio.presentError(message)
@@ -180,28 +191,45 @@ struct PlayerView: View {
     @ViewBuilder
     private var trackInfoSection: some View {
         if let streamingTitle = streaming.title {
-            VStack(spacing: 6) {
-                Text(streamingTitle)
-                    .font(.cadenzaTitle2)
-                    .foregroundColor(.cadenzaTextPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
+            HStack(alignment: .center, spacing: 12) {
+                streamingSkipButton(
+                    systemImage: "backward.fill",
+                    accessibilityLabel: "이전 곡",
+                    action: handleStreamingPrevious
+                )
 
-                if let artist = streaming.artist {
-                    Text(artist)
-                        .font(.cadenzaBody)
-                        .foregroundColor(.cadenzaTextSecondary)
-                        .lineLimit(1)
+                VStack(spacing: 6) {
+                    Text(streamingTitle)
+                        .font(.cadenzaTitle2)
+                        .foregroundColor(.cadenzaTextPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                    if let artist = streaming.artist {
+                        Text(artist)
+                            .font(.cadenzaBody)
+                            .foregroundColor(.cadenzaTextSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaWarning)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.cadenzaWarning.opacity(0.15))
+                        .clipShape(Capsule())
+                        .padding(.top, 4)
+
+                    streamingBeatAnchorControls
                 }
 
-                Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
-                    .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaWarning)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.cadenzaWarning.opacity(0.15))
-                    .clipShape(Capsule())
-                    .padding(.top, 4)
+                streamingSkipButton(
+                    systemImage: "forward.fill",
+                    accessibilityLabel: "다음 곡",
+                    action: handleStreamingNext
+                )
             }
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
@@ -432,98 +460,26 @@ struct PlayerView: View {
     private var playbackControls: some View {
         VStack(spacing: 16) {
             // 재생/정지 버튼 — 큰 버튼, 엄지 도달 영역 (DESIGN.md 2.1)
-            HStack(spacing: 22) {
-                if streaming.hasSong {
-                    streamingSkipButton(
-                        systemImage: "backward.fill",
-                        accessibilityLabel: "이전 곡",
-                        action: handleStreamingPrevious
+            Button(action: handlePrimaryPlayback) {
+                Image(systemName: primaryPlaybackIcon)
+                    .font(.system(size: 36))
+                    .foregroundColor(.cadenzaBackground)
+                    .frame(width: 80, height: 80)
+                    .background(
+                        isPlayable ? Color.cadenzaAccent : Color.cadenzaTextTertiary
                     )
-                }
-
-                Button(action: handlePrimaryPlayback) {
-                    Image(systemName: primaryPlaybackIcon)
-                        .font(.system(size: 36))
-                        .foregroundColor(.cadenzaBackground)
-                        .frame(width: 80, height: 80)
-                        .background(
-                            isPlayable ? Color.cadenzaAccent : Color.cadenzaTextTertiary
-                        )
-                        .clipShape(Circle())
-                }
-                .disabled(!isPlayable)
-                .accessibilityLabel(primaryPlaybackLabel)
-
-                if streaming.hasSong {
-                    streamingSkipButton(
-                        systemImage: "forward.fill",
-                        accessibilityLabel: "다음 곡",
-                        action: handleStreamingNext
-                    )
-                }
+                    .clipShape(Circle())
             }
+            .disabled(!isPlayable)
+            .accessibilityLabel(primaryPlaybackLabel)
 
             if audio.metronomeEnabled && (audio.state == .playing || streaming.isPlaying) {
-                Label("메트로놈 동작 중", systemImage: "metronome")
+                Label(metronomeStatusText, systemImage: "metronome")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
             }
 
-            // 파일 선택
-            Button(action: {
-                audio.clearError()
-                streaming.stop()
-                audio.stopExternalMetronomePlayback()
-                showFilePicker = true
-            }) {
-                Label("파일 선택", systemImage: "folder")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing)
-            .opacity(audio.state == .playing ? 0.4 : 1.0)
-            .accessibilityLabel("파일 선택")
-
-            Button(action: {
-                audio.clearError()
-                streaming.stop()
-                audio.stopExternalMetronomePlayback()
-                showAppleMusicPicker = true
-            }) {
-                Label(
-                    isImportingAppleMusic ? "Apple Music 불러오는 중" : "Apple Music 보관함",
-                    systemImage: "music.note.list"
-                )
-                .font(.cadenzaBody)
-                .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || isImportingAppleMusic)
-            .opacity(audio.state == .playing || isImportingAppleMusic ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 보관함")
-
-            Button(action: {
-                audio.clearError()
-                showAppleMusicStreamingSearch = true
-            }) {
-                Label("Apple Music 곡 검색", systemImage: "magnifyingglass")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || streaming.isLoading)
-            .opacity(audio.state == .playing || streaming.isLoading ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 곡 검색")
-
-            Button(action: {
-                audio.clearError()
-                showAppleMusicStreamingPlaylists = true
-            }) {
-                Label("Apple Music 플레이리스트", systemImage: "cloud")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || streaming.isLoading)
-            .opacity(audio.state == .playing || streaming.isLoading ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 플레이리스트")
+            sourceActionGrid
 
             sampleTrackButtons
 
@@ -553,6 +509,115 @@ struct PlayerView: View {
         .disabled(streaming.isLoading)
         .opacity(streaming.isLoading ? 0.45 : 1.0)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var sourceActionGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10),
+            ],
+            spacing: 10
+        ) {
+            sourceActionButton(
+                title: "파일",
+                systemImage: "folder",
+                isDisabled: audio.state == .playing,
+                action: {
+                    audio.clearError()
+                    streaming.stop()
+                    audio.stopExternalMetronomePlayback()
+                    showFilePicker = true
+                }
+            )
+
+            sourceActionButton(
+                title: isImportingAppleMusic ? "불러오는 중" : "보관함",
+                systemImage: "music.note.list",
+                isDisabled: audio.state == .playing || isImportingAppleMusic,
+                action: {
+                    audio.clearError()
+                    streaming.stop()
+                    audio.stopExternalMetronomePlayback()
+                    showAppleMusicPicker = true
+                }
+            )
+
+            sourceActionButton(
+                title: "검색",
+                systemImage: "magnifyingglass",
+                isDisabled: audio.state == .playing || streaming.isLoading,
+                action: {
+                    audio.clearError()
+                    showAppleMusicStreamingSearch = true
+                }
+            )
+
+            sourceActionButton(
+                title: "플레이리스트",
+                systemImage: "cloud",
+                isDisabled: audio.state == .playing || streaming.isLoading,
+                action: {
+                    audio.clearError()
+                    showAppleMusicStreamingPlaylists = true
+                }
+            )
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func sourceActionButton(
+        title: String,
+        systemImage: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Color.cadenzaBackgroundSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.cadenzaDivider, lineWidth: 1)
+                )
+        }
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1.0)
+        .accessibilityLabel(title)
+    }
+
+    @ViewBuilder
+    private var streamingBeatAnchorControls: some View {
+        if streaming.hasSong {
+            HStack(spacing: 8) {
+                Label(
+                    streamingAnchorOffset == nil ? "BPM 가이드 - 박자 기준 없음" : "저장된 박자 기준 사용",
+                    systemImage: streamingAnchorOffset == nil ? "waveform.badge.exclamationmark" : "checkmark.circle"
+                )
+                .font(.cadenzaCaption)
+                .foregroundColor(streamingAnchorOffset == nil ? .cadenzaWarning : .cadenzaAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+                Button(streamingAnchorButtonTitle) {
+                    recordStreamingBeatAnchorTap()
+                }
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaBackground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.cadenzaAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .disabled(streaming.currentBPM == nil)
+                .opacity(streaming.currentBPM == nil ? 0.45 : 1.0)
+            }
+            .padding(.top, 6)
+        }
     }
 
     private var sampleTrackButtons: some View {
@@ -679,6 +744,7 @@ struct PlayerView: View {
     private func playAppleMusicStream(_ song: Song) {
         audio.clearError()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
+        streamingAnchorOffset = streamingAnchorStore.offset(title: song.title, artist: song.artistName)
         if audio.state == .playing {
             audio.pause()
         }
@@ -691,6 +757,7 @@ struct PlayerView: View {
     private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry) {
         audio.clearError()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
+        streamingAnchorOffset = streamingAnchorStore.offset(title: entry.title, artist: entry.artistName)
         if audio.state == .playing {
             audio.pause()
         }
@@ -730,19 +797,73 @@ struct PlayerView: View {
             audio.stopExternalMetronomePlayback()
             return
         }
+        guard streamingAnchorOffset != nil else {
+            audio.stopExternalMetronomePlayback()
+            return
+        }
 
         audio.startExternalMetronomePlayback(alignedToSourceTime: streaming.playbackTime)
     }
 
     private func applyStreamingTempoAndAlignment(bpm: Double? = nil) {
         guard streaming.hasSong else { return }
+        let anchorOffset = streamingAnchorOffset
         audio.setStreamingBeatAlignment(
             bpm: bpm ?? streaming.currentBPM,
-            source: streaming.currentBPMSource ?? .metadata,
-            beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
-            beatTimesSeconds: streaming.currentBeatTimesSeconds
+            source: anchorOffset == nil ? .streamingGuide : .streamingAnchor,
+            beatOffsetSeconds: anchorOffset,
+            beatTimesSeconds: nil
         )
         syncStreamingMetronome()
+    }
+
+    private func refreshStreamingAnchorForCurrentTrack() {
+        guard let title = streaming.title else {
+            streamingAnchorOffset = nil
+            streamingAnchorTapTimes = []
+            return
+        }
+        streamingAnchorOffset = streamingAnchorStore.offset(title: title, artist: streaming.artist)
+        streamingAnchorTapTimes = []
+    }
+
+    private func recordStreamingBeatAnchorTap() {
+        guard let title = streaming.title else { return }
+        guard let bpm = streaming.currentBPM, bpm > 0 else {
+            audio.presentError("BPM을 먼저 확인한 뒤 박자를 맞출 수 있습니다")
+            return
+        }
+
+        streamingAnchorTapTimes.append(streaming.playbackTime)
+        if streamingAnchorTapTimes.count > StreamingBeatAnchorEstimator.requiredTapCount {
+            streamingAnchorTapTimes.removeFirst(streamingAnchorTapTimes.count - StreamingBeatAnchorEstimator.requiredTapCount)
+        }
+        guard streamingAnchorTapTimes.count == StreamingBeatAnchorEstimator.requiredTapCount else {
+            return
+        }
+
+        let beatDuration = 60.0 / bpm
+        guard let offset = StreamingBeatAnchorEstimator.estimatedOffset(
+            tapTimes: streamingAnchorTapTimes,
+            beatDuration: beatDuration
+        ) else { return }
+        streamingAnchorStore.saveOffset(offset, title: title, artist: streaming.artist)
+        streamingAnchorOffset = offset
+        streamingAnchorTapTimes = []
+        applyStreamingTempoAndAlignment()
+    }
+
+    private var streamingAnchorButtonTitle: String {
+        let remaining = StreamingBeatAnchorEstimator.requiredTapCount - streamingAnchorTapTimes.count
+        guard remaining < StreamingBeatAnchorEstimator.requiredTapCount else {
+            return streamingAnchorOffset == nil ? "박자 맞추기" : "다시 맞추기"
+        }
+        return "\(remaining)번 더 탭"
+    }
+
+    private var metronomeStatusText: String {
+        guard streaming.hasSong else { return "메트로놈 동작 중" }
+        return streamingAnchorOffset == nil ? "BPM 가이드 - 박자 기준 없음" : "박자 맞춤 메트로놈"
     }
 
     private var primaryPlaybackIcon: String {
