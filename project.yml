@@ -17,6 +17,9 @@ targets:
     platform: iOS
     sources:
       - Cadenza
+    configFiles:
+      Debug: Cadenza.xcconfig
+      Release: Cadenza.xcconfig
     settings:
       base:
         CODE_SIGN_STYLE: Automatic

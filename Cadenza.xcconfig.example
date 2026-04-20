@@ -1,0 +1,5 @@
+// Copy this file to Cadenza.xcconfig and fill in your own API keys.
+// Cadenza.xcconfig is gitignored — secrets never enter source control.
+GETSONGBPM_API_KEY = your_api_key_here
+
+INFOPLIST_KEY_GetSongBPMApiKey = $(GETSONGBPM_API_KEY)

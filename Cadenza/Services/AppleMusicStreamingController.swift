@@ -425,6 +425,31 @@ final class AppleMusicStreamingController: ObservableObject {
         logger.info("[preview_bpm] start title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) hasMusicKitPreview=\(previewAsset != nil)")
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = Task { @MainActor [weak self] in
+            // Priority 1: GetSongBPM.com curated lookup (fast, high accuracy on slow tracks).
+            if let external = await GetSongBPMService.shared.lookupBPM(title: title, artist: artist) {
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                let result = StreamingBPMResult(
+                    bpm: external.bpm,
+                    source: .metadata,
+                    beatOffsetSeconds: nil,
+                    beatTimesSeconds: nil,
+                    confidence: nil
+                )
+                if let songID {
+                    self.bpmCacheByKey[self.storeKey(songID)] = result
+                }
+                self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
+                self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: nil)] = result
+                if self.currentTitle == title && (artist == nil || self.currentArtist == artist) {
+                    self.applyResolvedBPM(result)
+                }
+                self.activePreviewAnalysisKey = nil
+                self.logger.info("[getsongbpm] hit bpm=\(external.bpm) matched=\(external.matchedArtist, privacy: .public) title=\(title, privacy: .public)")
+                return
+            }
+
+            // Priority 2: local preview analysis fallback.
             let analysis = await PreviewBPMAnalyzer.shared.estimateBeatAlignment(
                 directURL: previewAsset?.url,
                 hlsURL: previewAsset?.hlsURL,
