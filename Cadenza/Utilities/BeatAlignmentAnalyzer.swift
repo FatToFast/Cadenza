@@ -14,6 +14,7 @@ struct BeatAlignmentAnalysis: Codable, Equatable {
     let beatOffsetSeconds: TimeInterval
     let confidence: Double
     let manualNudgeSeconds: TimeInterval
+    let beatTimesSeconds: [TimeInterval]?
 }
 
 enum BeatAlignmentCacheStatus: String {
@@ -44,9 +45,121 @@ enum BeatOffsetRefinement {
     }
 }
 
+enum BPMIntervalRefinement {
+    static func refinedInterval(scoresByInterval: [Int: Double], bestInterval: Int) -> Double {
+        guard let mid = scoresByInterval[bestInterval] else { return Double(bestInterval) }
+        let prev = scoresByInterval[bestInterval - 1] ?? mid
+        let next = scoresByInterval[bestInterval + 1] ?? mid
+        let denom = prev - 2 * mid + next
+        guard denom.isFinite, denom != 0 else { return Double(bestInterval) }
+        let rawDelta = 0.5 * (prev - next) / denom
+        guard rawDelta.isFinite else { return Double(bestInterval) }
+        let delta = min(max(rawDelta, -0.5), 0.5)
+        return Double(bestInterval) + delta
+    }
+}
+
+struct BPMCandidate: Equatable {
+    let bpm: Double
+    let score: Double
+}
+
+enum BPMOctaveResolver {
+    private static let doubleTimeThreshold = 160.0
+    private static let halfTimeMin = 80.0
+    private static let halfTimeMax = 115.0
+    private static let halfTimeTolerance = 3.0
+    private static let halfTimeScoreRatio = 0.35
+    private static let slowTempoMin = 60.0
+    private static let slowTempoMax = 85.0
+    private static let slowTempoTolerance = 3.0
+    private static let slowTempoScoreRatio = 0.85
+
+    static func resolve(candidates: [BPMCandidate]) -> Double? {
+        let validCandidates = candidates.filter { candidate in
+            candidate.bpm.isFinite && candidate.score.isFinite && candidate.score > 0
+        }
+        guard let best = validCandidates.max(by: { $0.score < $1.score }) else {
+            return nil
+        }
+
+        if let halfTime = halfTimeCandidate(for: best, candidates: validCandidates) {
+            return halfTime.bpm
+        }
+
+        if let slowTempo = slowTempoCandidate(for: best, candidates: validCandidates) {
+            return slowTempo.bpm
+        }
+
+        return best.bpm
+    }
+
+    private static func halfTimeCandidate(
+        for best: BPMCandidate,
+        candidates: [BPMCandidate]
+    ) -> BPMCandidate? {
+        guard best.bpm >= doubleTimeThreshold else { return nil }
+
+        let halfTimeBPM = best.bpm / 2
+        guard halfTimeBPM >= halfTimeMin, halfTimeBPM <= halfTimeMax else { return nil }
+        guard let candidate = strongestCandidate(
+            near: halfTimeBPM,
+            tolerance: halfTimeTolerance,
+            candidates: candidates
+        ) else {
+            return nil
+        }
+
+        let scoreRatio = candidate.score / best.score
+        guard scoreRatio >= halfTimeScoreRatio else { return nil }
+        return candidate
+    }
+
+    private static func slowTempoCandidate(
+        for best: BPMCandidate,
+        candidates: [BPMCandidate]
+    ) -> BPMCandidate? {
+        guard best.bpm >= 105, best.bpm <= 130 else { return nil }
+
+        let slowBPM = best.bpm / 1.5
+        guard slowBPM >= slowTempoMin, slowBPM <= slowTempoMax else { return nil }
+        guard let candidate = strongestCandidate(
+            near: slowBPM,
+            tolerance: slowTempoTolerance,
+            candidates: candidates
+        ) else {
+            return nil
+        }
+
+        let scoreRatio = candidate.score / best.score
+        guard scoreRatio >= slowTempoScoreRatio else { return nil }
+        return candidate
+    }
+
+    private static func strongestCandidate(
+        near bpm: Double,
+        tolerance: Double,
+        candidates: [BPMCandidate]
+    ) -> BPMCandidate? {
+        candidates
+            .filter { abs($0.bpm - bpm) <= tolerance }
+            .max(by: { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return abs(lhs.bpm - bpm) > abs(rhs.bpm - bpm)
+                }
+                return lhs.score < rhs.score
+            })
+    }
+}
+
 struct BeatAlignmentLoadResult {
     let analysis: BeatAlignmentAnalysis?
     let cacheStatus: BeatAlignmentCacheStatus
+}
+
+private struct PreparedOnsetEnvelope {
+    let values: [Double]
+    let startIndex: Int
 }
 
 enum BeatAlignmentAnalyzer {
@@ -54,7 +167,9 @@ enum BeatAlignmentAnalyzer {
         let file = try AVAudioFile(forReading: url)
         let fingerprint = makeFingerprint(for: url, file: file)
 
-        if let cached = loadCachedAnalysis(for: url), cached.fingerprint == fingerprint {
+        if let cached = loadCachedAnalysis(for: url),
+           cached.fingerprint == fingerprint,
+           cached.beatTimesSeconds?.isEmpty == false {
             return BeatAlignmentLoadResult(analysis: cached, cacheStatus: .hit)
         }
 
@@ -80,7 +195,8 @@ enum BeatAlignmentAnalyzer {
             manualNudgeSeconds: BeatOffsetAdjustment.normalizedManualNudge(
                 manualNudge,
                 beatDuration: beatDuration
-            )
+            ),
+            beatTimesSeconds: analysis.beatTimesSeconds
         )
         try save(analysis: updated, for: url)
         return updated
@@ -108,23 +224,37 @@ enum BeatAlignmentAnalyzer {
 
         guard onsetEnvelope.count > 32 else { return nil }
         let preparedEnvelope = prepareOnsetEnvelope(onsetEnvelope)
-        guard preparedEnvelope.count > 32 else { return nil }
+        guard preparedEnvelope.values.count > 32 else { return nil }
 
-        let estimatedBPM = expectedBPM ?? estimateBPM(onsetEnvelope: preparedEnvelope, hopDuration: hopDuration)
+        let estimatedBPM = expectedBPM ?? estimateBPM(onsetEnvelope: preparedEnvelope.values, hopDuration: hopDuration)
         guard let estimatedBPM, estimatedBPM >= BPMRange.originalMin, estimatedBPM <= BPMRange.originalMax else {
             return nil
         }
 
-        let beatOffsetSeconds = estimateBeatOffset(
-            onsetEnvelope: preparedEnvelope,
+        let localBeatOffsetSeconds = estimateBeatOffset(
+            onsetEnvelope: preparedEnvelope.values,
             bpm: estimatedBPM,
             hopDuration: hopDuration
         )
+        let beatDuration = 60.0 / estimatedBPM
+        let analysisStartSeconds = Double(preparedEnvelope.startIndex) * hopDuration
+        let beatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
+            analysisStartSeconds + localBeatOffsetSeconds,
+            beatDuration: beatDuration
+        )
         let confidence = estimateConfidence(
-            onsetEnvelope: preparedEnvelope,
+            onsetEnvelope: preparedEnvelope.values,
             bpm: estimatedBPM,
-            beatOffsetSeconds: beatOffsetSeconds,
+            beatOffsetSeconds: localBeatOffsetSeconds,
             hopDuration: hopDuration
+        )
+        let beatTimesSeconds = estimateBeatTimes(
+            onsetEnvelope: preparedEnvelope.values,
+            bpm: estimatedBPM,
+            beatOffsetSeconds: localBeatOffsetSeconds,
+            hopDuration: hopDuration,
+            analysisStartSeconds: analysisStartSeconds,
+            durationSeconds: fingerprint.durationSeconds
         )
 
         return BeatAlignmentAnalysis(
@@ -132,7 +262,8 @@ enum BeatAlignmentAnalyzer {
             estimatedBPM: estimatedBPM,
             beatOffsetSeconds: beatOffsetSeconds,
             confidence: confidence,
-            manualNudgeSeconds: 0
+            manualNudgeSeconds: 0,
+            beatTimesSeconds: beatTimesSeconds
         )
     }
 
@@ -209,8 +340,10 @@ enum BeatAlignmentAnalyzer {
         return onsets
     }
 
-    private static func prepareOnsetEnvelope(_ onsetEnvelope: [Double]) -> [Double] {
-        guard onsetEnvelope.count > 8 else { return onsetEnvelope }
+    private static func prepareOnsetEnvelope(_ onsetEnvelope: [Double]) -> PreparedOnsetEnvelope {
+        guard onsetEnvelope.count > 8 else {
+            return PreparedOnsetEnvelope(values: onsetEnvelope, startIndex: 0)
+        }
 
         let mean = onsetEnvelope.reduce(0, +) / Double(onsetEnvelope.count)
         let variance = onsetEnvelope.reduce(into: 0.0) { partial, value in
@@ -221,16 +354,19 @@ enum BeatAlignmentAnalyzer {
 
         let firstStrongIndex = onsetEnvelope.firstIndex(where: { $0 > threshold }) ?? 0
         let startIndex = max(firstStrongIndex - 8, 0)
-        return Array(onsetEnvelope[startIndex...])
+        return PreparedOnsetEnvelope(values: Array(onsetEnvelope[startIndex...]), startIndex: startIndex)
     }
 
     private static func estimateBPM(onsetEnvelope: [Double], hopDuration: Double) -> Double? {
         guard !onsetEnvelope.isEmpty else { return nil }
 
-        var bestScore = 0.0
-        var bestBPM = BPMRange.originalDefault
-        for bpm in stride(from: 80.0, through: 200.0, by: 1.0) {
-            let interval = max(Int(round((60.0 / bpm) / hopDuration)), 1)
+        let minBPM = 60.0
+        let maxBPM = 200.0
+        let minInterval = max(Int(floor((60.0 / maxBPM) / hopDuration)), 1)
+        let maxInterval = max(Int(ceil((60.0 / minBPM) / hopDuration)), minInterval)
+        var scoresByInterval: [Int: Double] = [:]
+
+        for interval in minInterval...maxInterval {
             guard interval < onsetEnvelope.count else { continue }
 
             var score = 0.0
@@ -238,13 +374,30 @@ enum BeatAlignmentAnalyzer {
                 score += onsetEnvelope[index] * onsetEnvelope[index - interval]
             }
 
-            if score > bestScore {
-                bestScore = score
-                bestBPM = bpm
-            }
+            let pairCount = max(onsetEnvelope.count - interval, 1)
+            scoresByInterval[interval] = score / Double(pairCount)
         }
 
-        return bestScore > 0 ? bestBPM : nil
+        guard let bestInterval = scoresByInterval.max(by: { $0.value < $1.value })?.key,
+              let bestScore = scoresByInterval[bestInterval],
+              bestScore > 0 else {
+            return nil
+        }
+
+        let refinedInterval = BPMIntervalRefinement.refinedInterval(
+            scoresByInterval: scoresByInterval,
+            bestInterval: bestInterval
+        )
+        let refinedBPM = 60.0 / (refinedInterval * hopDuration)
+        var candidates = scoresByInterval.map { interval, score in
+            BPMCandidate(bpm: 60.0 / (Double(interval) * hopDuration), score: score)
+        }
+        candidates.removeAll { candidate in
+            abs(candidate.bpm - 60.0 / (Double(bestInterval) * hopDuration)) < 0.000_1
+        }
+        candidates.append(BPMCandidate(bpm: refinedBPM, score: bestScore))
+
+        return BPMOctaveResolver.resolve(candidates: candidates)
     }
 
     private static func estimateBeatOffset(
@@ -306,6 +459,67 @@ enum BeatAlignmentAnalyzer {
         baselineScore = onsetEnvelope.reduce(0, +) / Double(onsetEnvelope.count)
         guard baselineScore > 0 else { return 0 }
         return min(max(alignedScore / (baselineScore * Double(max(onsetEnvelope.count / beatFrames, 1))), 0), 1)
+    }
+
+    private static func estimateBeatTimes(
+        onsetEnvelope: [Double],
+        bpm: Double,
+        beatOffsetSeconds: TimeInterval,
+        hopDuration: Double,
+        analysisStartSeconds: TimeInterval,
+        durationSeconds: TimeInterval
+    ) -> [TimeInterval] {
+        let beatDuration = 60.0 / bpm
+        guard beatDuration.isFinite, beatDuration > 0, hopDuration > 0 else { return [] }
+        guard onsetEnvelope.count > 4 else { return [] }
+
+        let mean = onsetEnvelope.reduce(0, +) / Double(onsetEnvelope.count)
+        let variance = onsetEnvelope.reduce(into: 0.0) { partial, value in
+            let delta = value - mean
+            partial += delta * delta
+        } / Double(onsetEnvelope.count)
+        let peakThreshold = mean + sqrt(variance) * 0.2
+        let searchWindowFrames = max(Int(round((beatDuration * 0.22) / hopDuration)), 2)
+        let maxCorrection = min(beatDuration * 0.18, 0.09)
+        let analysisDuration = Double(onsetEnvelope.count - 1) * hopDuration
+        var localBeatTime = MetronomeSyncPlanner.normalizedOffset(
+            beatOffsetSeconds,
+            beatDuration: beatDuration
+        )
+
+        while localBeatTime - beatDuration >= 0 {
+            localBeatTime -= beatDuration
+        }
+
+        var beatTimes: [TimeInterval] = []
+        while localBeatTime <= analysisDuration {
+            let expectedIndex = Int(round(localBeatTime / hopDuration))
+            let lowerBound = max(expectedIndex - searchWindowFrames, 0)
+            let upperBound = min(expectedIndex + searchWindowFrames, onsetEnvelope.count - 1)
+
+            var peakIndex = expectedIndex
+            var peakValue = -Double.infinity
+            if lowerBound <= upperBound {
+                for index in lowerBound...upperBound where onsetEnvelope[index] > peakValue {
+                    peakIndex = index
+                    peakValue = onsetEnvelope[index]
+                }
+            }
+
+            let peakTime = Double(peakIndex) * hopDuration
+            let correctionWeight = peakValue >= peakThreshold ? 0.85 : 0.35
+            let correction = min(max(peakTime - localBeatTime, -maxCorrection), maxCorrection)
+            let adaptedLocalBeatTime = localBeatTime + correction * correctionWeight
+            let sourceBeatTime = analysisStartSeconds + adaptedLocalBeatTime
+
+            if sourceBeatTime >= 0, sourceBeatTime <= durationSeconds {
+                beatTimes.append(sourceBeatTime)
+            }
+
+            localBeatTime += beatDuration
+        }
+
+        return beatTimes
     }
 
     private static func makeFingerprint(for url: URL, file: AVAudioFile) -> BeatAlignmentFingerprint {

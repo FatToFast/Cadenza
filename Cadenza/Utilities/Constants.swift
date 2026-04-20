@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - BPM Ranges
 
 enum BPMRange {
-    static let targetMin: Double = 160
+    static let targetMin: Double = 90
     static let targetMax: Double = 220
     static let targetDefault: Double = 180
     static let originalDefault: Double = 120
@@ -11,6 +11,16 @@ enum BPMRange {
     static let originalMax: Double = 300
     static let rateMin: Float = 0.5
     static let rateMax: Float = 2.5
+    static let doubleTimeThreshold: Double = 100
+
+    static func automaticTarget(forOriginalBPM originalBPM: Double) -> Double {
+        originalBPM < doubleTimeThreshold ? 90 : 180
+    }
+
+    static func metronomeCadence(forTargetBPM targetBPM: Double) -> Double {
+        let cadence = targetBPM < doubleTimeThreshold ? targetBPM * 2 : targetBPM
+        return min(max(cadence, targetMin), targetMax)
+    }
 }
 
 enum MetronomeDefaults {
@@ -24,7 +34,7 @@ enum MetronomeDefaults {
 extension Color {
     static let cadenzaBackground = Color(hex: 0x0A0A0F)
     static let cadenzaBackgroundSecondary = Color(hex: 0x1A1A22)
-    static let cadenzaAccent = Color(hex: 0x00E5C7)
+    static let cadenzaAccent = Color(hex: 0xFF4F7A)
     static let cadenzaWarning = Color(hex: 0xFF8A3D)
     static let cadenzaTextPrimary = Color(hex: 0xF5F5F7)
     static let cadenzaTextSecondary = Color(hex: 0x9A9AA5)

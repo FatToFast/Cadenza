@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0C71CE4FFC6FC8B69091148F /* BeatOffsetRefinementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */; };
+		1FC0B40538CED2135469F8F1 /* AppleMusicStreamingPlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */; };
 		26BFD0B1BA71B630A502CF5C /* MusicLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671D48A837690377CB1AAE6 /* MusicLibraryService.swift */; };
 		280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */; };
 		425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */; };
@@ -47,6 +48,7 @@
 
 /* Begin PBXFileReference section */
 		0BAF3FB994C0A6FFC4979F4A /* AssetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetResolver.swift; sourceTree = "<group>"; };
+		2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingPlaylistView.swift; sourceTree = "<group>"; };
 		3F8FFC774733449AD9A28B63 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		498EA72F6CA1930D69CB9A0B /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMDisplayView.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 			isa = PBXGroup;
 			children = (
 				8FAA9392A307FEA406DB5B74 /* AppleMusicLibraryView.swift */,
+				2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */,
 				92F95249D0AD96D91DF31B11 /* AppleMusicStreamingSearchView.swift */,
 				498EA72F6CA1930D69CB9A0B /* PlayerView.swift */,
 				FF6634F7FE4E287249122CC8 /* Components */,
@@ -274,6 +277,7 @@
 			files = (
 				799739F1F33E39D022002646 /* AppleMusicLibraryView.swift in Sources */,
 				5FA58B30E3AE018498FEC51A /* AppleMusicStreamingController.swift in Sources */,
+				1FC0B40538CED2135469F8F1 /* AppleMusicStreamingPlaylistView.swift in Sources */,
 				9671FC8640EF94F79471A100 /* AppleMusicStreamingSearchView.swift in Sources */,
 				E5852286B1AAFBCAC44835DC /* AppleMusicTrack.swift in Sources */,
 				7AAC3F44673E680ECA0C6C6C /* AssetResolver.swift in Sources */,

@@ -67,6 +67,11 @@ struct MetronomeSyncPlan: Equatable {
     }
 }
 
+struct BeatGridMetronomeSyncPlan: Equatable {
+    let syncPlan: MetronomeSyncPlan
+    let beatGridIndex: Int?
+}
+
 enum MetronomeSyncPlanner {
     static func planNextBeat(
         currentSourceTime: TimeInterval,
@@ -116,6 +121,101 @@ enum MetronomeSyncPlanner {
         guard beatDuration > 0 else { return 0 }
         let normalized = sourceBeatOffset.truncatingRemainder(dividingBy: beatDuration)
         return normalized >= 0 ? normalized : normalized + beatDuration
+    }
+}
+
+enum BeatGridSyncPlanner {
+    static func planNextBeat(
+        currentSourceTime: TimeInterval,
+        beatTimesSeconds: [TimeInterval],
+        fallbackSourceBeatOffset: TimeInterval,
+        originalBPM: Double,
+        targetBPM: Double,
+        beatsPerBar: Int = MetronomeDefaults.beatsPerBar
+    ) -> BeatGridMetronomeSyncPlan {
+        let beatTimes = sanitizedBeatTimes(beatTimesSeconds)
+        guard !beatTimes.isEmpty, originalBPM > 0, targetBPM > 0 else {
+            return BeatGridMetronomeSyncPlan(
+                syncPlan: MetronomeSyncPlanner.planNextBeat(
+                    currentSourceTime: currentSourceTime,
+                    sourceBeatOffset: fallbackSourceBeatOffset,
+                    originalBPM: originalBPM,
+                    targetBPM: targetBPM,
+                    beatsPerBar: beatsPerBar
+                ),
+                beatGridIndex: nil
+            )
+        }
+
+        let playbackRate = targetBPM / originalBPM
+        let safeSourceTime = max(currentSourceTime, 0)
+        let onBeatTolerance = 0.001
+
+        if let nextIndex = beatTimes.firstIndex(where: { $0 + onBeatTolerance >= safeSourceTime }) {
+            let nextSourceBeat = beatTimes[nextIndex]
+            let sourceDelta = max(nextSourceBeat - safeSourceTime, 0)
+            return BeatGridMetronomeSyncPlan(
+                syncPlan: MetronomeSyncPlan(
+                    nextBeatDelay: sourceDelta / playbackRate,
+                    startingBeatIndex: nextIndex % beatsPerBar
+                ),
+                beatGridIndex: nextIndex
+            )
+        }
+
+        let beatDuration = 60.0 / originalBPM
+        let lastIndex = max(beatTimes.count - 1, 0)
+        let lastBeat = beatTimes[lastIndex]
+        let beatsSinceLast = max(Int(floor((safeSourceTime - lastBeat) / beatDuration)), 0)
+        let nextSourceBeat = lastBeat + (Double(beatsSinceLast) + 1) * beatDuration
+        let sourceDelta = max(nextSourceBeat - safeSourceTime, 0)
+        return BeatGridMetronomeSyncPlan(
+            syncPlan: MetronomeSyncPlan(
+                nextBeatDelay: sourceDelta / playbackRate,
+                startingBeatIndex: (lastIndex + beatsSinceLast + 1) % beatsPerBar
+            ),
+            beatGridIndex: nil
+        )
+    }
+
+    static func intervalAfterBeat(
+        at beatGridIndex: Int?,
+        beatTimesSeconds: [TimeInterval],
+        originalBPM: Double,
+        targetBPM: Double
+    ) -> TimeInterval {
+        let defaultDuration = targetBPM > 0 ? 60.0 / targetBPM : 0.5
+        guard originalBPM > 0, targetBPM > 0 else { return defaultDuration }
+        guard let beatGridIndex else { return defaultDuration }
+
+        let beatTimes = sanitizedBeatTimes(beatTimesSeconds)
+        guard beatTimes.indices.contains(beatGridIndex),
+              beatTimes.indices.contains(beatGridIndex + 1) else {
+            return defaultDuration
+        }
+
+        let sourceInterval = beatTimes[beatGridIndex + 1] - beatTimes[beatGridIndex]
+        guard sourceInterval.isFinite, sourceInterval > 0 else { return defaultDuration }
+
+        let playbackRate = targetBPM / originalBPM
+        let adaptedDuration = sourceInterval / playbackRate
+        guard adaptedDuration.isFinite, adaptedDuration > 0 else { return defaultDuration }
+
+        let lowerBound = defaultDuration * 0.72
+        let upperBound = defaultDuration * 1.32
+        return min(max(adaptedDuration, lowerBound), upperBound)
+    }
+
+    private static func sanitizedBeatTimes(_ beatTimesSeconds: [TimeInterval]) -> [TimeInterval] {
+        var previous: TimeInterval?
+        return beatTimesSeconds
+            .filter { $0.isFinite && $0 >= 0 }
+            .sorted()
+            .filter { beatTime in
+                defer { previous = beatTime }
+                guard let previous else { return true }
+                return beatTime - previous > 0.05
+            }
     }
 }
 

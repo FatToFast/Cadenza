@@ -38,6 +38,47 @@ final class PlaybackModelsTests: XCTestCase {
         )
     }
 
+    func testBeatGridSyncPlanFollowsDetectedBeatTimestamps() {
+        let plan = BeatGridSyncPlanner.planNextBeat(
+            currentSourceTime: 0.90,
+            beatTimesSeconds: [0.24, 0.93, 1.57],
+            fallbackSourceBeatOffset: 0.24,
+            originalBPM: 90,
+            targetBPM: 90
+        )
+
+        XCTAssertEqual(plan.syncPlan.nextBeatDelay, 0.03, accuracy: 0.0001)
+        XCTAssertEqual(plan.syncPlan.startingBeatIndex, 1)
+        XCTAssertEqual(plan.beatGridIndex, 1)
+    }
+
+    func testBeatGridIntervalUsesDetectedNextBeatSpacing() {
+        XCTAssertEqual(
+            BeatGridSyncPlanner.intervalAfterBeat(
+                at: 1,
+                beatTimesSeconds: [0.24, 0.93, 1.57],
+                originalBPM: 90,
+                targetBPM: 90
+            ),
+            0.64,
+            accuracy: 0.0001
+        )
+    }
+
+    func testBeatGridSyncPlanFallsBackAfterDetectedGridEnds() {
+        let plan = BeatGridSyncPlanner.planNextBeat(
+            currentSourceTime: 2.12,
+            beatTimesSeconds: [0.24, 0.93, 1.57],
+            fallbackSourceBeatOffset: 0.24,
+            originalBPM: 90,
+            targetBPM: 90
+        )
+
+        XCTAssertEqual(plan.syncPlan.nextBeatDelay, 0.1167, accuracy: 0.0001)
+        XCTAssertEqual(plan.syncPlan.startingBeatIndex, 3)
+        XCTAssertNil(plan.beatGridIndex)
+    }
+
     func testEffectiveBeatOffsetWrapsForwardWithinBeatDuration() {
         XCTAssertEqual(
             BeatOffsetAdjustment.effectiveOffset(
@@ -123,5 +164,101 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertTrue(OriginalBPMSource.metadata.helperText.contains("메타데이터"))
         XCTAssertTrue(OriginalBPMSource.analysis.helperText.contains("분석"))
         XCTAssertTrue(OriginalBPMSource.assumedDefault.helperText.contains("120 BPM"))
+    }
+
+    func testAutomaticTargetKeepsSlowTracksNearOriginalTempo() {
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 89), 90)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 90), 90)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 92), 90)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 99), 90)
+    }
+
+    func testAutomaticTargetUsesDoubleTimeAtOneHundredAndAbove() {
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 100), 180)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 128), 180)
+    }
+
+    func testMetronomeCadenceUsesDoubleTimeForNinetyTarget() {
+        XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 90), 180)
+        XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 95), 190)
+        XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 180), 180)
+    }
+
+    func testBeatGridIntervalCanClickDoubleTimeWhilePlaybackTargetStaysNinety() {
+        let playbackTargetBPM = 90.0
+        let metronomeBPM = BPMRange.metronomeCadence(forTargetBPM: playbackTargetBPM)
+        let metronomeSourceCadenceBPM = 90.0 * (metronomeBPM / playbackTargetBPM)
+
+        XCTAssertEqual(
+            BeatGridSyncPlanner.intervalAfterBeat(
+                at: 0,
+                beatTimesSeconds: [0, 1.0 / 3.0, 2.0 / 3.0],
+                originalBPM: metronomeSourceCadenceBPM,
+                targetBPM: metronomeBPM
+            ),
+            1.0 / 3.0,
+            accuracy: 0.0001
+        )
+    }
+
+    func testBPMOctaveResolverPrefersHalfTimeWhenDoubleTimeCandidateIsLikely() {
+        let resolved = BPMOctaveResolver.resolve(candidates: [
+            BPMCandidate(bpm: 94, score: 0.42),
+            BPMCandidate(bpm: 95, score: 0.48),
+            BPMCandidate(bpm: 188, score: 1.0),
+        ])
+
+        XCTAssertEqual(resolved, 95)
+    }
+
+    func testBPMOctaveResolverKeepsHighTempoWhenHalfTimeCandidateIsWeak() {
+        let resolved = BPMOctaveResolver.resolve(candidates: [
+            BPMCandidate(bpm: 94, score: 0.20),
+            BPMCandidate(bpm: 188, score: 1.0),
+        ])
+
+        XCTAssertEqual(resolved, 188)
+    }
+
+    func testBPMOctaveResolverDoesNotHalveMidTempoCandidate() {
+        let resolved = BPMOctaveResolver.resolve(candidates: [
+            BPMCandidate(bpm: 71, score: 0.8),
+            BPMCandidate(bpm: 142, score: 1.0),
+        ])
+
+        XCTAssertEqual(resolved, 142)
+    }
+
+    func testBPMIntervalRefinementMovesPeakBetweenAdjacentIntervals() {
+        let refinedInterval = BPMIntervalRefinement.refinedInterval(
+            scoresByInterval: [
+                46: 0.0001603688,
+                47: 0.0001612668,
+                48: 0.0001188420,
+            ],
+            bestInterval: 47
+        )
+
+        XCTAssertEqual(refinedInterval, 46.52, accuracy: 0.01)
+    }
+
+    func testBPMOctaveResolverKeepsRefinedDrowningTempo() {
+        let resolved = BPMOctaveResolver.resolve(candidates: [
+            BPMCandidate(bpm: 107.67, score: 0.0001188420),
+            BPMCandidate(bpm: 111.09, score: 0.0001612668),
+            BPMCandidate(bpm: 112.35, score: 0.0001603688),
+        ])
+
+        XCTAssertEqual(resolved ?? 0, 111.09, accuracy: 0.01)
+    }
+
+    func testBPMOctaveResolverPrefersSlowTempoOverStrongOnePointFiveHarmonic() {
+        let resolved = BPMOctaveResolver.resolve(candidates: [
+            BPMCandidate(bpm: 74.90, score: 0.0000184775),
+            BPMCandidate(bpm: 112.75, score: 0.0000186446),
+            BPMCandidate(bpm: 114.84, score: 0.0000168609),
+        ])
+
+        XCTAssertEqual(resolved ?? 0, 74.90, accuracy: 0.01)
     }
 }
