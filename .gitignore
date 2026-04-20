@@ -35,3 +35,6 @@ Package.resolved
 # oh-my-claudecode runtime state
 .omc/
 .omx/
+
+# Local secrets (xcconfig) — copy Cadenza.xcconfig.example to Cadenza.xcconfig
+Cadenza.xcconfig
