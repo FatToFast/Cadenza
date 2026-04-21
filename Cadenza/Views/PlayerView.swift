@@ -87,10 +87,19 @@ struct PlayerView: View {
 
                         Divider().background(Color.cadenzaDivider)
 
+                        // 플레이어 컨트롤
+                        playbackControls
+
+                        Divider().background(Color.cadenzaDivider)
+
                         metronomeControls
                             .padding(.horizontal, 20)
 
-                        Spacer(minLength: 8)
+                        Divider().background(Color.cadenzaDivider)
+
+                        trackSelectionControls
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 32)
                     }
                     .padding(.bottom, 32)
                 }
