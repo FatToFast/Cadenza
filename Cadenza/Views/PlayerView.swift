@@ -125,8 +125,8 @@ struct PlayerView: View {
             }
         }
         .sheet(isPresented: $showAppleMusicStreamingPlaylists) {
-            AppleMusicStreamingPlaylistView { playlist, entry in
-                playAppleMusicPlaylist(playlist, entry: entry)
+            AppleMusicStreamingPlaylistView { playlist, entry, entries in
+                playAppleMusicPlaylist(playlist, entry: entry, entries: entries)
             }
         }
         .onAppear(perform: syncOriginalBPMText)
@@ -842,7 +842,7 @@ struct PlayerView: View {
         }
     }
 
-    private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry) {
+    private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry, entries: [Playlist.Entry]) {
         audio.clearError()
         clearLocalPlaylist()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
@@ -850,7 +850,12 @@ struct PlayerView: View {
             audio.pause()
         }
         Task {
-            await streaming.play(playlist: playlist, startingAt: entry, playbackRate: audio.playbackRate)
+            await streaming.play(
+                playlist: playlist,
+                startingAt: entry,
+                playbackRate: audio.playbackRate,
+                preloadedEntries: entries
+            )
             syncStreamingMetronome()
         }
     }

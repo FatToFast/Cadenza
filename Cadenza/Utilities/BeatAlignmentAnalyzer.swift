@@ -2,13 +2,13 @@ import AVFoundation
 import CryptoKit
 import Foundation
 
-struct BeatAlignmentFingerprint: Codable, Equatable {
+struct BeatAlignmentFingerprint: Codable, Equatable, Sendable {
     let fileSize: Int64
     let modifiedAt: TimeInterval
     let durationSeconds: TimeInterval
 }
 
-struct BeatAlignmentAnalysis: Codable, Equatable {
+struct BeatAlignmentAnalysis: Codable, Equatable, Sendable {
     let fingerprint: BeatAlignmentFingerprint
     let estimatedBPM: Double
     let beatOffsetSeconds: TimeInterval

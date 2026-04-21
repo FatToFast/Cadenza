@@ -175,6 +175,8 @@ final class PlaybackModelsTests: XCTestCase {
 
     func testAutomaticTargetUsesDoubleTimeAtOneHundredAndAbove() {
         XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 100), 180)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 103), 180)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 120), 180)
         XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 128), 180)
     }
 
@@ -260,5 +262,77 @@ final class PlaybackModelsTests: XCTestCase {
         ])
 
         XCTAssertEqual(resolved ?? 0, 74.90, accuracy: 0.01)
+    }
+
+    func testRunningCadenceFitRecognizesNinetyAsNaturalDoubleTime() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 90)
+
+        XCTAssertEqual(fit.status, .excellent)
+        XCTAssertEqual(fit.pulseMultiplier, 2.0)
+        XCTAssertEqual(fit.playbackRate, 1.0, accuracy: 0.0001)
+    }
+
+    func testRunningCadenceFitRecognizesOneTwentyAsNaturalThreeOverTwo() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 120)
+
+        XCTAssertEqual(fit.status, .excellent)
+        XCTAssertEqual(fit.pulseMultiplier, 1.5)
+        XCTAssertEqual(fit.playbackRate, 1.0, accuracy: 0.0001)
+    }
+
+    func testRunningCadenceFitMarksLargeSpeedChangesAsAwkward() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 150)
+
+        XCTAssertEqual(fit.status, .unsuitable)
+        XCTAssertFalse(fit.isRecommended)
+    }
+
+    func testRunningCadenceFitWarnsButDoesNotSlowOneHundredThreeBPM() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 103)
+
+        XCTAssertEqual(fit.status, .awkward)
+        XCTAssertGreaterThan(fit.playbackRate, 1.0)
+    }
+
+    func testRunningCadenceFitRejectsInvalidBPM() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 0)
+
+        XCTAssertEqual(fit.status, .unknown)
+        XCTAssertEqual(fit.badgeText, "BPM 미확인")
+    }
+
+    func testRunningCadenceFitMarksLowPreviewConfidenceAsAwkward() {
+        let fit = RunningCadenceFit.evaluate(
+            originalBPM: 120,
+            previewSignal: RunningPreviewSignal(
+                confidence: 0.21,
+                beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+            )
+        )
+
+        XCTAssertEqual(fit.status, .awkward)
+        XCTAssertEqual(fit.riskReason, .lowConfidence)
+        XCTAssertEqual(fit.badgeText, "신뢰도 낮음")
+    }
+
+    func testRunningCadenceFitMarksUnstablePreviewBeatGridAsUnsuitable() {
+        let fit = RunningCadenceFit.evaluate(
+            originalBPM: 120,
+            previewSignal: RunningPreviewSignal(
+                confidence: 0.8,
+                beatTimesSeconds: [0.0, 0.5, 1.18, 1.47, 2.1]
+            )
+        )
+
+        XCTAssertEqual(fit.status, .unsuitable)
+        XCTAssertEqual(fit.riskReason, .unstableBeatGrid)
+        XCTAssertEqual(fit.badgeText, "박자 불안정")
+    }
+
+    func testRunningCadenceFitMarksExtremeSpeedUpAsUnsuitable() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 72)
+
+        XCTAssertEqual(fit.status, .unsuitable)
+        XCTAssertEqual(fit.badgeText, "러닝 부적합")
     }
 }

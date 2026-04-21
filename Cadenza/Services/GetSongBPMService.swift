@@ -32,6 +32,7 @@ actor GetSongBPMService {
     private let apiKeyProvider: @Sendable () -> String?
     private let baseURL: URL
     private var cache: [LookupKey: Result?] = [:]
+    private var inFlightLookups: [LookupKey: Task<Result?, Never>] = [:]
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "GetSongBPM")
 
     init(
@@ -52,15 +53,37 @@ actor GetSongBPMService {
             return cached
         }
         if let override = curatedOverride(title: title, artist: artist) {
-            cache[key] = override
+            cache.updateValue(override, forKey: key)
             return override
         }
-        let result = try? await performLookup(title: title, artist: artist)
-        cache[key] = result
+        if let inFlightLookup = inFlightLookups[key] {
+            return await inFlightLookup.value
+        }
+
+        let lookupTask = Task<Result?, Never> { [weak self] in
+            guard let self else { return nil as Result? }
+            return await self.performLookupResult(title: title, artist: artist)
+        }
+        inFlightLookups[key] = lookupTask
+        let result = await lookupTask.value
+        cache.updateValue(result, forKey: key)
+        inFlightLookups[key] = nil
         return result
     }
 
-    func prefetchBPMs(_ tracks: [TrackLookup], maxConcurrentRequests: Int = 4) async {
+    func cachedBPM(title: String, artist: String?) -> Result? {
+        let key = LookupKey(title: normalized(title), artist: artist.map(normalized))
+        if let cached = cache[key] {
+            return cached
+        }
+        return curatedOverride(title: title, artist: artist)
+    }
+
+    private func performLookupResult(title: String, artist: String?) async -> Result? {
+        try? await performLookup(title: title, artist: artist)
+    }
+
+    func prefetchBPMs(_ tracks: [TrackLookup], maxConcurrentRequests: Int = 1) async {
         let uniqueTracks = uniqueUncachedTracks(from: tracks)
         guard !uniqueTracks.isEmpty else { return }
 
@@ -138,7 +161,7 @@ actor GetSongBPMService {
         let compactArtist = normalizedArtist
             .filter { $0.isLetter || $0.isNumber }
 
-        if normalizedTitle == "달리기", compactArtist == "ses" {
+        if normalizedTitle.contains("달리기"), compactArtist == "ses" {
             return Result(bpm: 103, matchedArtist: "S.E.S.", matchedTitle: "달리기")
         }
 

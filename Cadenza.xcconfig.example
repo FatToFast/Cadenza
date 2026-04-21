@@ -1,5 +1,7 @@
 // Copy this file to Cadenza.xcconfig and fill in your own API keys.
 // Cadenza.xcconfig is gitignored — secrets never enter source control.
 GETSONGBPM_API_KEY = your_api_key_here
+SPOTIFY_CLIENT_ID = your_spotify_client_id_here
 
 INFOPLIST_KEY_GetSongBPMApiKey = $(GETSONGBPM_API_KEY)
+INFOPLIST_KEY_SpotifyClientID = $(SPOTIFY_CLIENT_ID)

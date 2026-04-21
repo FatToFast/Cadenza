@@ -3,12 +3,14 @@ import SwiftUI
 
 @MainActor
 struct AppleMusicStreamingPlaylistView: View {
-    let onEntryPicked: (Playlist, Playlist.Entry) -> Void
+    let onEntryPicked: (Playlist, Playlist.Entry, [Playlist.Entry]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var playlists: [Playlist] = []
     @State private var entriesByPlaylist: [MusicItemID: [Playlist.Entry]] = [:]
+    @State private var cadenceFitsByEntryID: [MusicItemID: RunningCadenceFit] = [:]
+    @State private var hiddenEntryIDs: Set<MusicItemID> = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -125,22 +127,36 @@ struct AppleMusicStreamingPlaylistView: View {
                 }
             }
 
-            ForEach(entriesByPlaylist[playlist.id] ?? [], id: \.id) { entry in
+            let visibleEntries = (entriesByPlaylist[playlist.id] ?? []).filter { !hiddenEntryIDs.contains($0.id) }
+            ForEach(visibleEntries, id: \.id) { entry in
                 Button {
-                    onEntryPicked(playlist, entry)
+                    onEntryPicked(playlist, entry, entriesByPlaylist[playlist.id] ?? [])
                     dismiss()
                 } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.title)
-                            .foregroundColor(.primary)
-                        Text(entry.artistName)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        if let albumTitle = entry.albumTitle {
-                            Text(albumTitle)
-                                .font(.caption2)
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.title)
+                                .foregroundColor(.primary)
+                            Text(entry.artistName)
+                                .font(.caption)
                                 .foregroundColor(.secondary)
+                            if let albumTitle = entry.albumTitle {
+                                Text(albumTitle)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
+
+                        Spacer(minLength: 8)
+
+                        cadenceFitBadge(for: entry)
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        hiddenEntryIDs.insert(entry.id)
+                    } label: {
+                        Label("숨기기", systemImage: "eye.slash")
                     }
                 }
             }
@@ -172,21 +188,89 @@ struct AppleMusicStreamingPlaylistView: View {
             let detailedPlaylist = try await playlist.with(.entries)
             let entries = Array(detailedPlaylist.entries ?? [])
             entriesByPlaylist[playlist.id] = entries
-            prefetchGetSongBPM(for: entries)
+            analyzeRunningCadenceFit(for: entries)
         } catch {
             entriesByPlaylist[playlist.id] = []
             errorMessage = "곡 목록을 불러오지 못했습니다: \(error.localizedDescription)"
         }
     }
 
-    private func prefetchGetSongBPM(for entries: [Playlist.Entry]) {
-        let lookups = entries.map {
-            GetSongBPMService.TrackLookup(title: $0.title, artist: $0.artistName)
+    @ViewBuilder
+    private func cadenceFitBadge(for entry: Playlist.Entry) -> some View {
+        if let fit = cadenceFitsByEntryID[entry.id] {
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(fit.badgeText)
+                    .font(.cadenzaCaption)
+                    .foregroundColor(color(for: fit.status))
+                    .lineLimit(1)
+
+                Text(fit.detailText)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 82, alignment: .trailing)
+        } else {
+            Text("분석 중")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(minWidth: 82, alignment: .trailing)
         }
-        guard !lookups.isEmpty else { return }
+    }
+
+    private func analyzeRunningCadenceFit(for entries: [Playlist.Entry]) {
+        let pendingEntries = entries.filter { cadenceFitsByEntryID[$0.id] == nil }
+        guard !pendingEntries.isEmpty else { return }
 
         Task(priority: .utility) {
-            await GetSongBPMService.shared.prefetchBPMs(lookups)
+            for entry in pendingEntries {
+                let bpm = await GetSongBPMService.shared.lookupBPM(
+                    title: entry.title,
+                    artist: entry.artistName
+                )?.bpm
+                let previewSignal = await previewSignal(for: entry)
+                let fit = RunningCadenceFit.evaluate(
+                    originalBPM: bpm,
+                    previewSignal: previewSignal
+                )
+                await MainActor.run {
+                    cadenceFitsByEntryID[entry.id] = fit
+                }
+            }
+        }
+    }
+
+    private func previewSignal(for entry: Playlist.Entry) async -> RunningPreviewSignal? {
+        guard let previewAsset = entry.previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil }) else {
+            return nil
+        }
+        guard let analysis = await PreviewBPMAnalyzer.shared.estimateBeatAlignment(
+            directURL: previewAsset.url,
+            hlsURL: previewAsset.hlsURL,
+            title: entry.title,
+            artist: entry.artistName
+        ) else {
+            return nil
+        }
+
+        return RunningPreviewSignal(
+            confidence: analysis.confidence,
+            beatTimesSeconds: analysis.beatTimesSeconds ?? []
+        )
+    }
+
+    private func color(for status: RunningCadenceFitStatus) -> Color {
+        switch status {
+        case .excellent:
+            return .cadenzaAccent
+        case .usable:
+            return .cadenzaTextSecondary
+        case .awkward:
+            return .cadenzaWarning
+        case .unsuitable:
+            return .cadenzaWarning
+        case .unknown:
+            return .cadenzaTextTertiary
         }
     }
 }
