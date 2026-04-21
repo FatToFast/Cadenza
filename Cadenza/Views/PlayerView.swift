@@ -82,12 +82,9 @@ struct PlayerView: View {
                         metronomeControls
                             .padding(.horizontal, 20)
 
-                        Divider().background(Color.cadenzaDivider)
-
-                        // 플레이어 컨트롤
-                        playbackControls
-                            .padding(.bottom, 32)
+                        Spacer(minLength: 8)
                     }
+                    .padding(.bottom, 32)
                 }
             }
 
@@ -210,6 +207,9 @@ struct PlayerView: View {
                 trackSelectionControls
                     .padding(.top, 2)
 
+                playbackControls
+                    .padding(.top, 4)
+
                 Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaWarning)
@@ -238,6 +238,9 @@ struct PlayerView: View {
 
                 trackSelectionControls
                     .padding(.top, 2)
+
+                playbackControls
+                    .padding(.top, 4)
 
                 // 상태 배지
                 Label("키 락 ON", systemImage: "music.note")
@@ -286,6 +289,9 @@ struct PlayerView: View {
 
                 trackSelectionControls
                     .padding(.top, 2)
+
+                playbackControls
+                    .padding(.top, 4)
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
@@ -307,6 +313,9 @@ struct PlayerView: View {
 
                 trackSelectionControls
                     .padding(.top, 2)
+
+                playbackControls
+                    .padding(.top, 4)
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
