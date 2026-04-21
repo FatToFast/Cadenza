@@ -35,7 +35,7 @@ struct PlayerView: View {
 
                 ScrollView {
                     VStack(spacing: 24) {
-                        // 곡 정보 또는 empty state
+                        // 곡 정보/선택
                         trackInfoSection
                             .padding(.top, 20)
 
@@ -84,7 +84,7 @@ struct PlayerView: View {
 
                         Divider().background(Color.cadenzaDivider)
 
-                        // 재생 버튼 + 파일 선택
+                        // 플레이어 컨트롤
                         playbackControls
                             .padding(.bottom, 32)
                     }
@@ -193,7 +193,7 @@ struct PlayerView: View {
     @ViewBuilder
     private var trackInfoSection: some View {
         if let streamingTitle = streaming.title {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text(streamingTitle)
                     .font(.cadenzaTitle2)
                     .foregroundColor(.cadenzaTextPrimary)
@@ -207,6 +207,9 @@ struct PlayerView: View {
                         .lineLimit(1)
                 }
 
+                trackSelectionControls
+                    .padding(.top, 2)
+
                 Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaWarning)
@@ -219,7 +222,7 @@ struct PlayerView: View {
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
             // 곡 로드됨
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text(title)
                     .font(.cadenzaTitle2)
                     .foregroundColor(.cadenzaTextPrimary)
@@ -232,6 +235,9 @@ struct PlayerView: View {
                         .foregroundColor(.cadenzaTextSecondary)
                         .lineLimit(1)
                 }
+
+                trackSelectionControls
+                    .padding(.top, 2)
 
                 // 상태 배지
                 Label("키 락 ON", systemImage: "music.note")
@@ -277,8 +283,12 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
                     .multilineTextAlignment(.center)
+
+                trackSelectionControls
+                    .padding(.top, 2)
             }
             .padding(.vertical, 20)
+            .padding(.horizontal, 20)
         } else {
             // Empty state (DESIGN.md 2.2.1)
             VStack(spacing: 8) {
@@ -294,9 +304,111 @@ struct PlayerView: View {
                 Text("지원 형식: mp3, m4a, wav")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
+
+                trackSelectionControls
+                    .padding(.top, 2)
             }
             .padding(.vertical, 20)
+            .padding(.horizontal, 20)
         }
+    }
+
+    private var trackSelectionControls: some View {
+        VStack(spacing: 8) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 8),
+                ],
+                spacing: 8
+            ) {
+                selectionButton(
+                    title: "파일 선택",
+                    systemImage: "folder",
+                    isDisabled: audio.state == .playing,
+                    action: {
+                        audio.clearError()
+                        streaming.stop()
+                        audio.stopExternalMetronomePlayback()
+                        showFilePicker = true
+                    }
+                )
+                .accessibilityLabel("파일 선택")
+
+                selectionButton(
+                    title: "MP3 플레이리스트",
+                    systemImage: "music.note.list",
+                    isDisabled: audio.state == .playing,
+                    action: {
+                        audio.clearError()
+                        streaming.stop()
+                        audio.stopExternalMetronomePlayback()
+                        showPlaylistFilePicker = true
+                    }
+                )
+                .accessibilityLabel("MP3 플레이리스트 만들기")
+
+                selectionButton(
+                    title: isImportingAppleMusic ? "Apple Music 불러오는 중" : "Apple Music 보관함",
+                    systemImage: "music.note.list",
+                    isDisabled: audio.state == .playing || isImportingAppleMusic,
+                    action: {
+                        audio.clearError()
+                        streaming.stop()
+                        audio.stopExternalMetronomePlayback()
+                        showAppleMusicPicker = true
+                    }
+                )
+                .accessibilityLabel("Apple Music 보관함")
+
+                selectionButton(
+                    title: "Apple Music 곡 검색",
+                    systemImage: "magnifyingglass",
+                    isDisabled: audio.state == .playing || streaming.isLoading,
+                    action: {
+                        audio.clearError()
+                        showAppleMusicStreamingSearch = true
+                    }
+                )
+                .accessibilityLabel("Apple Music 곡 검색")
+
+                selectionButton(
+                    title: "Apple Music 플레이리스트",
+                    systemImage: "cloud",
+                    isDisabled: audio.state == .playing || streaming.isLoading,
+                    action: {
+                        audio.clearError()
+                        showAppleMusicStreamingPlaylists = true
+                    }
+                )
+                .accessibilityLabel("Apple Music 플레이리스트")
+            }
+        }
+    }
+
+    private func selectionButton(
+        title: String,
+        systemImage: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity, minHeight: 42)
+                .padding(.horizontal, 10)
+                .background(Color.cadenzaBackgroundSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.cadenzaDivider, lineWidth: 1)
+                )
+        }
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.4 : 1.0)
     }
 
     private var originalBPMControls: some View {
@@ -546,82 +658,6 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
             }
-
-            // 파일 선택
-            Button(action: {
-                audio.clearError()
-                streaming.stop()
-                audio.stopExternalMetronomePlayback()
-                showFilePicker = true
-            }) {
-                Label("파일 선택", systemImage: "folder")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing)
-            .opacity(audio.state == .playing ? 0.4 : 1.0)
-            .accessibilityLabel("파일 선택")
-
-            Button(action: {
-                audio.clearError()
-                streaming.stop()
-                audio.stopExternalMetronomePlayback()
-                showPlaylistFilePicker = true
-            }) {
-                Label("MP3 플레이리스트", systemImage: "music.note.list")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing)
-            .opacity(audio.state == .playing ? 0.4 : 1.0)
-            .accessibilityLabel("MP3 플레이리스트 만들기")
-
-            Button(action: {
-                audio.clearError()
-                streaming.stop()
-                audio.stopExternalMetronomePlayback()
-                showAppleMusicPicker = true
-            }) {
-                Label(
-                    isImportingAppleMusic ? "Apple Music 불러오는 중" : "Apple Music 보관함",
-                    systemImage: "music.note.list"
-                )
-                .font(.cadenzaBody)
-                .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || isImportingAppleMusic)
-            .opacity(audio.state == .playing || isImportingAppleMusic ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 보관함")
-
-            Button(action: {
-                audio.clearError()
-                showAppleMusicStreamingSearch = true
-            }) {
-                Label("Apple Music 곡 검색", systemImage: "magnifyingglass")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || streaming.isLoading)
-            .opacity(audio.state == .playing || streaming.isLoading ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 곡 검색")
-
-            Button(action: {
-                audio.clearError()
-                showAppleMusicStreamingPlaylists = true
-            }) {
-                Label("Apple Music 플레이리스트", systemImage: "cloud")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaAccent)
-            }
-            .disabled(audio.state == .playing || streaming.isLoading)
-            .opacity(audio.state == .playing || streaming.isLoading ? 0.4 : 1.0)
-            .accessibilityLabel("Apple Music 플레이리스트")
-
-            sampleTrackButtons
-
-            Text("파일/다운로드 곡은 피치락, 스트리밍 곡은 Apple Music 플레이어로 재생")
-                .font(.cadenzaCaption)
-                .foregroundColor(.cadenzaTextTertiary)
         }
     }
 
@@ -671,37 +707,6 @@ struct PlayerView: View {
         .opacity(isDisabled ? 0.45 : 1.0)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(isOn ? "켜짐" : "꺼짐")
-    }
-
-    private var sampleTrackButtons: some View {
-        VStack(spacing: 8) {
-            Text("샘플 오디오")
-                .font(.cadenzaCaption)
-                .foregroundColor(.cadenzaTextSecondary)
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 8),
-                    GridItem(.flexible(), spacing: 8),
-                ],
-                spacing: 8
-            ) {
-                ForEach(SampleTrackPreset.allCases) { preset in
-                    Button(action: { loadSampleTrack(preset) }) {
-                        Text(preset.title)
-                            .font(.cadenzaCaption)
-                            .foregroundColor(.cadenzaTextPrimary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.cadenzaBackgroundSecondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(audio.state == .playing)
-                    .opacity(audio.state == .playing ? 0.4 : 1.0)
-                    .accessibilityLabel("\(preset.title) 샘플")
-                }
-            }
-        }
     }
 
     private var isPlayable: Bool {
@@ -790,17 +795,6 @@ struct PlayerView: View {
             let nsError = error as NSError
             guard nsError.code != NSUserCancelledError else { return }
             audio.presentError("MP3 플레이리스트를 만들 수 없습니다")
-        }
-    }
-
-    private func loadSampleTrack(_ preset: SampleTrackPreset = .clickLoop) {
-        audio.clearError()
-        streaming.stop()
-        audio.stopExternalMetronomePlayback()
-        clearLocalPlaylist()
-        Task {
-            await audio.loadSampleTrack(preset)
-            updateLocalPlaylistEndBehavior()
         }
     }
 
