@@ -15,8 +15,6 @@ enum OriginalBPMSource: Sendable, Equatable {
     case assumedDefault
     case preset
     case manual
-    case streamingGuide
-    case streamingAnchor
 
     var badgeText: String {
         switch self {
@@ -30,10 +28,6 @@ enum OriginalBPMSource: Sendable, Equatable {
             return "샘플 기본값"
         case .manual:
             return "직접 입력"
-        case .streamingGuide:
-            return "BPM 가이드"
-        case .streamingAnchor:
-            return "박자 맞춤"
         }
     }
 
@@ -49,47 +43,7 @@ enum OriginalBPMSource: Sendable, Equatable {
             return "샘플 프리셋의 기본 BPM을 적용했습니다. 필요하면 직접 수정할 수 있습니다."
         case .manual:
             return "직접 입력한 BPM을 기준으로 재생 속도를 계산합니다."
-        case .streamingGuide:
-            return "Apple Music 스트리밍은 BPM만 맞춘 가이드입니다. 박자 기준 없음 상태입니다."
-        case .streamingAnchor:
-            return "저장된 박자 기준으로 Apple Music 메트로놈을 맞춥니다."
         }
-    }
-}
-
-struct StreamingBeatAnchorStore {
-    private let defaults: UserDefaults
-    private let prefix = "streamingBeatAnchor.v1"
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    func offset(title: String, artist: String?) -> TimeInterval? {
-        let key = storageKey(title: title, artist: artist)
-        guard defaults.object(forKey: key) != nil else { return nil }
-        let value = defaults.double(forKey: key)
-        return value.isFinite ? value : nil
-    }
-
-    func saveOffset(_ offset: TimeInterval, title: String, artist: String?) {
-        guard offset.isFinite else { return }
-        defaults.set(offset, forKey: storageKey(title: title, artist: artist))
-    }
-
-    func removeOffset(title: String, artist: String?) {
-        defaults.removeObject(forKey: storageKey(title: title, artist: artist))
-    }
-
-    private func storageKey(title: String, artist: String?) -> String {
-        "\(prefix).\(normalized(title)).\(normalized(artist ?? ""))"
-    }
-
-    private func normalized(_ value: String) -> String {
-        value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .filter { $0.isLetter || $0.isNumber }
     }
 }
 
@@ -304,30 +258,5 @@ enum BeatOffsetAdjustment {
             desiredOffset - detectedOffset,
             beatDuration: beatDuration
         )
-    }
-}
-
-enum StreamingBeatAnchorEstimator {
-    static let requiredTapCount = 8
-
-    static func estimatedOffset(
-        tapTimes: [TimeInterval],
-        beatDuration: TimeInterval
-    ) -> TimeInterval? {
-        guard beatDuration > 0 else { return nil }
-        let phases = tapTimes
-            .filter { $0.isFinite && $0 >= 0 }
-            .map { MetronomeSyncPlanner.normalizedOffset($0, beatDuration: beatDuration) }
-        guard phases.count >= requiredTapCount else { return nil }
-
-        let angles = phases.map { ($0 / beatDuration) * 2 * Double.pi }
-        let sinSum = angles.reduce(0) { $0 + sin($1) }
-        let cosSum = angles.reduce(0) { $0 + cos($1) }
-        guard sinSum.isFinite, cosSum.isFinite else { return nil }
-        guard abs(sinSum) > 0.000_001 || abs(cosSum) > 0.000_001 else { return nil }
-
-        let angle = atan2(sinSum, cosSum)
-        let normalizedAngle = angle >= 0 ? angle : angle + 2 * Double.pi
-        return (normalizedAngle / (2 * Double.pi)) * beatDuration
     }
 }

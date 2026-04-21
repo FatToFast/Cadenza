@@ -34,4 +34,77 @@ final class QueueItemTests: XCTestCase {
                              source: .file(URL(fileURLWithPath: "/tmp/a.mp3")))
         XCTAssertNil(item.unplayableReason)
     }
+
+    func testLocalFilePlaylistBuildsItemsFromFileURLs() {
+        let playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/01 First.mp3"),
+            URL(fileURLWithPath: "/tmp/02 Second.mp3"),
+        ])
+
+        XCTAssertEqual(playlist.count, 2)
+        XCTAssertEqual(playlist.currentItem?.title, "01 First")
+        XCTAssertEqual(playlist.queueContext?.currentIndex, 0)
+        XCTAssertEqual(playlist.queueContext?.totalCount, 2)
+        XCTAssertEqual(playlist.queueContext?.nextTitle, "02 Second")
+    }
+
+    func testLocalFilePlaylistMovesForwardAndBackwardWithoutWrapping() {
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+        ])
+
+        XCTAssertFalse(playlist.canMovePrevious)
+        XCTAssertTrue(playlist.canMoveNext)
+        XCTAssertEqual(playlist.moveToNext()?.title, "b")
+        XCTAssertTrue(playlist.canMovePrevious)
+        XCTAssertFalse(playlist.canMoveNext)
+        XCTAssertNil(playlist.moveToNext())
+        XCTAssertEqual(playlist.moveToPrevious()?.title, "a")
+    }
+
+    func testLocalFilePlaylistEmptyHasNoCurrentItem() {
+        let playlist = LocalFilePlaylist(fileURLs: [])
+
+        XCTAssertTrue(playlist.isEmpty)
+        XCTAssertNil(playlist.currentItem)
+        XCTAssertNil(playlist.queueContext)
+    }
+
+    func testLocalFilePlaylistShuffleKeepsCurrentTrackAndRestoresOriginalOrder() {
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+            URL(fileURLWithPath: "/tmp/c.mp3"),
+            URL(fileURLWithPath: "/tmp/d.mp3"),
+        ])
+        XCTAssertEqual(playlist.moveToNext()?.title, "b")
+
+        var generator = FixedRandomNumberGenerator(values: [2, 0, 1])
+        XCTAssertEqual(playlist.toggleShuffle(using: &generator)?.title, "b")
+
+        XCTAssertTrue(playlist.isShuffled)
+        XCTAssertEqual(playlist.currentItem?.title, "b")
+        XCTAssertEqual(playlist.queueContext?.currentIndex, 0)
+        XCTAssertEqual(playlist.count, 4)
+        XCTAssertFalse(Array(playlist.items.dropFirst()).contains { $0.title == "b" })
+
+        XCTAssertEqual(playlist.toggleShuffle(using: &generator)?.title, "b")
+        XCTAssertFalse(playlist.isShuffled)
+        XCTAssertEqual(playlist.currentItem?.title, "b")
+        XCTAssertEqual(playlist.queueContext?.currentIndex, 1)
+        XCTAssertEqual(playlist.items.map(\.title), ["a", "b", "c", "d"])
+    }
+}
+
+private struct FixedRandomNumberGenerator: RandomNumberGenerator {
+    private var values: [UInt64]
+
+    init(values: [UInt64]) {
+        self.values = values
+    }
+
+    mutating func next() -> UInt64 {
+        values.isEmpty ? 0 : values.removeFirst()
+    }
 }

@@ -926,7 +926,7 @@ final class AudioManager: ObservableObject {
         guard let buffer = Self.makeMetronomeBeatBuffer(
             format: metronomeFormat,
             frequency: isDownbeat ? 1_320 : 880,
-            gain: isDownbeat ? 0.42 : 0.28,
+            gain: isDownbeat ? 0.95 : 0.72,
             beatDuration: intervalDuration
         ) else {
             logger.error("[M-02] Metronome buffer unavailable, stopping metronome")
@@ -971,13 +971,13 @@ final class AudioManager: ObservableObject {
         accentBeatBuffer = Self.makeMetronomeBeatBuffer(
             format: metronomeFormat,
             frequency: 1_320,
-            gain: 0.42,
+            gain: 0.95,
             beatDuration: beatDuration
         )
         regularBeatBuffer = Self.makeMetronomeBeatBuffer(
             format: metronomeFormat,
             frequency: 880,
-            gain: 0.28,
+            gain: 0.72,
             beatDuration: beatDuration
         )
     }
@@ -1205,36 +1205,17 @@ final class AudioManager: ObservableObject {
         buffer.frameLength = frameCount
 
         let channel = channelData[0]
-        let clickDuration = min(0.075, beatDuration)
-        let isAccent = frequency > 1_000
-        var noiseSeed: UInt32 = isAccent ? 0xC0FFEE : 0x51A7E
+        let clickDuration = min(0.05, beatDuration)
         for frame in 0..<Int(frameCount) {
             let time = Double(frame) / format.sampleRate
             guard time < clickDuration else {
                 channel[frame] = 0
                 continue
             }
-
-            noiseSeed = noiseSeed &* 1_664_525 &+ 1_013_904_223
-            let noise = Double(Int32(bitPattern: noiseSeed)) / Double(Int32.max)
-
-            let attack = min(time / 0.003, 1)
-            let transientEnvelope = attack * exp(-time * (isAccent ? 42 : 58))
-            let bodyEnvelope = attack * exp(-time * (isAccent ? 24 : 36))
-
-            let body: Double
-            let transient: Double
-            if isAccent {
-                let pitchDrop = 120 - min(time * 1_200, 58)
-                body = sin(2 * .pi * pitchDrop * time) * bodyEnvelope * 0.95
-                transient = noise * transientEnvelope * 0.42
-            } else {
-                let wood = sin(2 * .pi * 1_050 * time) + 0.45 * sin(2 * .pi * 1_780 * time)
-                body = wood * bodyEnvelope * 0.42
-                transient = noise * transientEnvelope * 0.30
-            }
-
-            channel[frame] = Float(body + transient) * gain
+            let envelope = Float(exp(-time * 36))
+            let fundamental = sin(2 * .pi * frequency * time)
+            let overtone = 0.35 * sin(2 * .pi * frequency * 1.8 * time)
+            channel[frame] = Float(fundamental + overtone) * envelope * gain
         }
 
         return buffer

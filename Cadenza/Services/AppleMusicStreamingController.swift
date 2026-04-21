@@ -34,12 +34,9 @@ final class AppleMusicStreamingController: ObservableObject {
     private var bpmAnalysisTask: Task<Void, Never>?
     private var activePreviewAnalysisKey: String?
     private var failedPreviewAnalysisKeys: Set<String> = []
-    private var getSongBPMAttemptedKeys: Set<String> = []
     private var bpmCacheByKey: [String: StreamingBPMResult] = [:]
     private var didBuildBPMCache = false
     private var desiredPlaybackRate: Float = 1.0
-    private let transitionRateSuppressionDuration: TimeInterval = 1.2
-    private var suppressRateEnforcementUntil: Date?
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
 
     var hasSong: Bool {
@@ -80,7 +77,6 @@ final class AppleMusicStreamingController: ObservableObject {
             currentArtist = song.artistName
             applyResolvedBPM(bpm(for: song))
             startPreviewBPMAnalysisIfNeeded(for: song)
-            applyQueueTransition()
             player.queue = ApplicationMusicPlayer.Queue(for: [song])
             startPlayerObservation()
             syncCurrentEntryFromQueue()
@@ -116,7 +112,6 @@ final class AppleMusicStreamingController: ObservableObject {
             currentArtist = entry.artistName
             applyResolvedBPM(bpm(for: entry))
             startPreviewBPMAnalysisIfNeeded(for: entry)
-            applyQueueTransition()
             player.queue = ApplicationMusicPlayer.Queue(playlist: playlist, startingAt: entry)
             startPlayerObservation()
             syncCurrentEntryFromQueue()
@@ -188,12 +183,6 @@ final class AppleMusicStreamingController: ObservableObject {
         enforcePlaybackRate(reason: "requested")
     }
 
-    private func applyQueueTransition() {
-        if #available(iOS 18.0, *) {
-            player.transition = .none
-        }
-    }
-
     private enum SkipDirection {
         case next
         case previous
@@ -203,8 +192,6 @@ final class AppleMusicStreamingController: ObservableObject {
         guard currentTitle != nil else { return }
 
         do {
-            applyQueueTransition()
-            suppressRateEnforcementDuringTransition()
             switch direction {
             case .next:
                 try await player.skipToNextEntry()
@@ -214,7 +201,8 @@ final class AppleMusicStreamingController: ObservableObject {
 
             syncPlaybackStatus()
             syncCurrentEntryFromQueue()
-            reapplyPlaybackRateAfterTransition()
+            applyPlaybackRate(playbackRate)
+            reapplyPlaybackRateAfterStartup()
         } catch {
             errorMessage = direction == .next
                 ? "다음 곡으로 넘어갈 수 없습니다"
@@ -244,6 +232,7 @@ final class AppleMusicStreamingController: ObservableObject {
             while !Task.isCancelled {
                 self?.syncPlaybackStatus()
                 self?.syncCurrentEntryFromQueue()
+                self?.enforcePlaybackRateIfPlaying(reason: "poll")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -258,6 +247,7 @@ final class AppleMusicStreamingController: ObservableObject {
         if resolvedBPM == nil {
             startPreviewBPMAnalysisIfNeeded(for: entry)
         }
+        enforcePlaybackRateIfPlaying(reason: "queue-sync")
     }
 
     private func artistName(for entry: MusicKit.MusicPlayer.Queue.Entry) -> String? {
@@ -426,51 +416,15 @@ final class AppleMusicStreamingController: ObservableObject {
         previewAssets: [PreviewAsset]?
     ) {
         let identityKey = songID.map(storeKey) ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
-        let cachedResult = bpmCacheByKey[identityKey]
-        let shouldTryGetSongBPM = !getSongBPMAttemptedKeys.contains(identityKey)
-        guard cachedResult == nil || shouldTryGetSongBPM else { return }
+        guard bpmCacheByKey[identityKey] == nil else { return }
         guard activePreviewAnalysisKey != identityKey else { return }
-        guard shouldTryGetSongBPM || !failedPreviewAnalysisKeys.contains(identityKey) else { return }
+        guard !failedPreviewAnalysisKeys.contains(identityKey) else { return }
         let previewAsset = previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil })
 
         activePreviewAnalysisKey = identityKey
-        if shouldTryGetSongBPM {
-            getSongBPMAttemptedKeys.insert(identityKey)
-        }
         logger.info("[preview_bpm] start title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) hasMusicKitPreview=\(previewAsset != nil)")
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = Task { @MainActor [weak self] in
-            // Priority 1: GetSongBPM.com curated lookup (fast, high accuracy on slow tracks).
-            if shouldTryGetSongBPM, let external = await GetSongBPMService.shared.lookupBPM(title: title, artist: artist) {
-                guard !Task.isCancelled else { return }
-                guard let self else { return }
-                let result = StreamingBPMResult(
-                    bpm: external.bpm,
-                    source: .metadata,
-                    beatOffsetSeconds: nil,
-                    beatTimesSeconds: nil,
-                    confidence: nil
-                )
-                if let songID {
-                    self.bpmCacheByKey[self.storeKey(songID)] = result
-                }
-                self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
-                self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: nil)] = result
-                if self.currentTitle == title && (artist == nil || self.currentArtist == artist) {
-                    self.applyResolvedBPM(result)
-                }
-                self.activePreviewAnalysisKey = nil
-                self.logger.info("[getsongbpm] hit bpm=\(external.bpm) matched=\(external.matchedArtist, privacy: .public) title=\(title, privacy: .public)")
-                return
-            }
-
-            guard cachedResult == nil else {
-                guard let self else { return }
-                self.activePreviewAnalysisKey = nil
-                return
-            }
-
-            // Priority 2: local preview analysis fallback.
             let analysis = await PreviewBPMAnalyzer.shared.estimateBeatAlignment(
                 directURL: previewAsset?.url,
                 hlsURL: previewAsset?.hlsURL,
@@ -517,23 +471,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func enforcePlaybackRateIfPlaying(reason: String) {
         guard isPlaying || player.state.playbackStatus == .playing else { return }
-        if let suppressRateEnforcementUntil, Date() < suppressRateEnforcementUntil {
-            return
-        }
         enforcePlaybackRate(reason: reason)
-    }
-
-    private func suppressRateEnforcementDuringTransition() {
-        suppressRateEnforcementUntil = Date().addingTimeInterval(transitionRateSuppressionDuration)
-    }
-
-    private func reapplyPlaybackRateAfterTransition() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: UInt64(self.transitionRateSuppressionDuration * 1_000_000_000))
-            self.suppressRateEnforcementUntil = nil
-            self.enforcePlaybackRateIfPlaying(reason: "post-transition")
-        }
     }
 
     private func enforcePlaybackRate(reason: String) {

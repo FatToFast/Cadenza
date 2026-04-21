@@ -154,8 +154,6 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(OriginalBPMSource.analysis.badgeText, "자동 분석")
         XCTAssertEqual(OriginalBPMSource.assumedDefault.badgeText, "확인 필요")
         XCTAssertEqual(OriginalBPMSource.manual.badgeText, "직접 입력")
-        XCTAssertEqual(OriginalBPMSource.streamingGuide.badgeText, "BPM 가이드")
-        XCTAssertEqual(OriginalBPMSource.streamingAnchor.badgeText, "박자 맞춤")
     }
 
     func testPresetHelperTextExplainsPresetSource() {
@@ -166,48 +164,6 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertTrue(OriginalBPMSource.metadata.helperText.contains("메타데이터"))
         XCTAssertTrue(OriginalBPMSource.analysis.helperText.contains("분석"))
         XCTAssertTrue(OriginalBPMSource.assumedDefault.helperText.contains("120 BPM"))
-        XCTAssertTrue(OriginalBPMSource.streamingGuide.helperText.contains("박자 기준 없음"))
-        XCTAssertTrue(OriginalBPMSource.streamingAnchor.helperText.contains("저장된 박자"))
-    }
-
-    func testStreamingBeatAnchorStoreNormalizesAndPersistsOffset() {
-        let suiteName = "StreamingBeatAnchorStoreTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
-
-        let store = StreamingBeatAnchorStore(defaults: defaults)
-        store.saveOffset(0.37, title: " 달리기 ", artist: "S.E.S.")
-
-        XCTAssertEqual(store.offset(title: "달리기", artist: "ses") ?? -1, 0.37, accuracy: 0.0001)
-
-        store.removeOffset(title: "달리기", artist: "SES")
-        XCTAssertNil(store.offset(title: "달리기", artist: "S.E.S."))
-    }
-
-    func testStreamingBeatAnchorEstimatorAveragesEightTaps() {
-        let beatDuration = 0.5
-        let taps = [10.118, 10.625, 11.121, 11.616, 12.123, 12.619, 13.126, 13.622]
-
-        let offset = StreamingBeatAnchorEstimator.estimatedOffset(
-            tapTimes: taps,
-            beatDuration: beatDuration
-        )
-
-        XCTAssertEqual(offset ?? -1, 0.121, accuracy: 0.004)
-    }
-
-    func testStreamingBeatAnchorEstimatorHandlesBeatBoundary() {
-        let beatDuration = 0.5
-        let taps = [10.492, 10.498, 11.003, 11.497, 12.002, 12.496, 13.001, 13.499]
-
-        let offset = StreamingBeatAnchorEstimator.estimatedOffset(
-            tapTimes: taps,
-            beatDuration: beatDuration
-        )
-
-        XCTAssertEqual(offset ?? -1, 0.499, accuracy: 0.006)
     }
 
     func testAutomaticTargetKeepsSlowTracksNearOriginalTempo() {

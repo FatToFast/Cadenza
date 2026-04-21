@@ -32,6 +32,9 @@ Package.resolved
 # Claude
 .claude/
 
+# Superpowers brainstorming mockups
+.superpowers/
+
 # oh-my-claudecode runtime state
 .omc/
 .omx/
