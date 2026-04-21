@@ -465,13 +465,21 @@ struct PlayerView: View {
             // 재생/정지 버튼 — 큰 버튼, 엄지 도달 영역 (DESIGN.md 2.1)
             HStack(spacing: 14) {
                 if streaming.hasSong {
+                    circularToggleButton(
+                        systemImage: "shuffle",
+                        accessibilityLabel: streaming.isShuffleEnabled ? "Apple Music 셔플 끄기" : "Apple Music 셔플 켜기",
+                        isOn: streaming.isShuffleEnabled,
+                        isDisabled: !streaming.canShuffle || streaming.isLoading,
+                        action: handleStreamingShuffleToggle
+                    )
+
                     circularPlaybackButton(
                         systemImage: "backward.fill",
                         accessibilityLabel: "이전 곡",
                         isDisabled: streaming.isLoading,
                         action: handleStreamingPrevious
                     )
-                } else if !localPlaylist.isEmpty {
+                } else {
                     circularToggleButton(
                         systemImage: "shuffle",
                         accessibilityLabel: localPlaylist.isShuffled ? "셔플 끄기" : "셔플 켜기",
@@ -848,6 +856,10 @@ struct PlayerView: View {
             await streaming.skipToPrevious(playbackRate: audio.playbackRate)
             applyStreamingTempoAndAlignment()
         }
+    }
+
+    private func handleStreamingShuffleToggle() {
+        streaming.toggleShuffle()
     }
 
     private func handleLocalPlaylistNext() {
