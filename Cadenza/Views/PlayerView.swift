@@ -463,7 +463,7 @@ struct PlayerView: View {
     private var playbackControls: some View {
         VStack(spacing: 16) {
             // 재생/정지 버튼 — 큰 버튼, 엄지 도달 영역 (DESIGN.md 2.1)
-            HStack(spacing: 22) {
+            HStack(spacing: 14) {
                 if streaming.hasSong {
                     circularPlaybackButton(
                         systemImage: "backward.fill",
@@ -471,13 +471,23 @@ struct PlayerView: View {
                         isDisabled: streaming.isLoading,
                         action: handleStreamingPrevious
                     )
-                } else if localPlaylist.count > 1 {
-                    circularPlaybackButton(
-                        systemImage: "backward.fill",
-                        accessibilityLabel: "이전 MP3",
-                        isDisabled: !localPlaylist.canMovePrevious || audio.state == .loading,
-                        action: handleLocalPlaylistPrevious
+                } else if !localPlaylist.isEmpty {
+                    circularToggleButton(
+                        systemImage: "shuffle",
+                        accessibilityLabel: localPlaylist.isShuffled ? "셔플 끄기" : "셔플 켜기",
+                        isOn: localPlaylist.isShuffled,
+                        isDisabled: !localPlaylist.canShuffle || audio.state == .loading,
+                        action: handleLocalPlaylistShuffleToggle
                     )
+
+                    if localPlaylist.count > 1 {
+                        circularPlaybackButton(
+                            systemImage: "backward.fill",
+                            accessibilityLabel: "이전 MP3",
+                            isDisabled: !localPlaylist.canMovePrevious || audio.state == .loading,
+                            action: handleLocalPlaylistPrevious
+                        )
+                    }
                 }
 
                 Button(action: handlePrimaryPlayback) {
@@ -514,25 +524,6 @@ struct PlayerView: View {
                 Label("메트로놈 동작 중", systemImage: "metronome")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
-            }
-
-            if localPlaylist.canShuffle && !streaming.hasSong {
-                Button(action: handleLocalPlaylistShuffleToggle) {
-                    Label(localPlaylist.isShuffled ? "셔플 켜짐" : "셔플", systemImage: "shuffle")
-                        .font(.cadenzaBody)
-                        .foregroundColor(localPlaylist.isShuffled ? .cadenzaBackground : .cadenzaAccent)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(localPlaylist.isShuffled ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.cadenzaDivider, lineWidth: 1)
-                        )
-                }
-                .disabled(audio.state == .loading)
-                .opacity(audio.state == .loading ? 0.45 : 1.0)
-                .padding(.horizontal, 20)
-                .accessibilityLabel(localPlaylist.isShuffled ? "셔플 끄기" : "셔플 켜기")
             }
 
             // 파일 선택
@@ -634,6 +625,31 @@ struct PlayerView: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1.0)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func circularToggleButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        isOn: Bool,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(isOn ? .cadenzaBackground : .cadenzaAccent)
+                .frame(width: 52, height: 52)
+                .background(isOn ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.cadenzaDivider, lineWidth: 1)
+                )
+        }
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1.0)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(isOn ? "켜짐" : "꺼짐")
     }
 
     private var sampleTrackButtons: some View {
