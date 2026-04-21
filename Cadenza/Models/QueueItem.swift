@@ -107,6 +107,12 @@ struct LocalFilePlaylist: Sendable, Equatable {
         return currentItem
     }
 
+    mutating func moveToStart() -> QueueItem? {
+        guard !items.isEmpty else { return nil }
+        currentIndex = 0
+        return currentItem
+    }
+
     private mutating func shuffleRemaining<R: RandomNumberGenerator>(using generator: inout R) {
         guard let currentItem else { return }
         let remaining = originalItems

@@ -60,6 +60,10 @@ final class QueueItemTests: XCTestCase {
         XCTAssertTrue(playlist.canMovePrevious)
         XCTAssertFalse(playlist.canMoveNext)
         XCTAssertNil(playlist.moveToNext())
+        XCTAssertEqual(playlist.moveToStart()?.title, "a")
+        XCTAssertFalse(playlist.canMovePrevious)
+        XCTAssertTrue(playlist.canMoveNext)
+        XCTAssertEqual(playlist.moveToNext()?.title, "b")
         XCTAssertEqual(playlist.moveToPrevious()?.title, "a")
     }
 

@@ -27,6 +27,8 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var canShuffle = false
     @Published private(set) var isShuffleEnabled = false
+    @Published private(set) var canRepeat = false
+    @Published private(set) var isRepeatEnabled = false
     @Published private(set) var errorMessage: String?
 
     private let player = ApplicationMusicPlayer.shared
@@ -80,7 +82,9 @@ final class AppleMusicStreamingController: ObservableObject {
             applyResolvedBPM(bpm(for: song))
             startPreviewBPMAnalysisIfNeeded(for: song)
             canShuffle = false
+            canRepeat = true
             setShuffleEnabled(false)
+            setRepeatEnabled(false)
             player.queue = ApplicationMusicPlayer.Queue(for: [song])
             startPlayerObservation()
             syncCurrentEntryFromQueue()
@@ -117,7 +121,9 @@ final class AppleMusicStreamingController: ObservableObject {
             applyResolvedBPM(bpm(for: entry))
             startPreviewBPMAnalysisIfNeeded(for: entry)
             canShuffle = true
+            canRepeat = true
             setShuffleEnabled(false)
+            setRepeatEnabled(false)
             player.queue = ApplicationMusicPlayer.Queue(playlist: playlist, startingAt: entry)
             startPlayerObservation()
             syncCurrentEntryFromQueue()
@@ -166,6 +172,11 @@ final class AppleMusicStreamingController: ObservableObject {
         setShuffleEnabled(!isShuffleEnabled)
     }
 
+    func toggleRepeat() {
+        guard canRepeat else { return }
+        setRepeatEnabled(!isRepeatEnabled)
+    }
+
     func stop() {
         player.stop()
         queueCancellable = nil
@@ -184,7 +195,9 @@ final class AppleMusicStreamingController: ObservableObject {
         bpmAnalysisTask = nil
         activePreviewAnalysisKey = nil
         canShuffle = false
+        canRepeat = false
         setShuffleEnabled(false)
+        setRepeatEnabled(false)
         isPlaying = false
         isLoading = false
     }
@@ -238,6 +251,7 @@ final class AppleMusicStreamingController: ObservableObject {
                 await Task.yield()
                 self?.syncPlaybackStatus()
                 self?.syncShuffleStatus()
+                self?.syncRepeatStatus()
                 self?.syncCurrentEntryFromQueue()
             }
         }
@@ -246,6 +260,7 @@ final class AppleMusicStreamingController: ObservableObject {
             while !Task.isCancelled {
                 self?.syncPlaybackStatus()
                 self?.syncShuffleStatus()
+                self?.syncRepeatStatus()
                 self?.syncCurrentEntryFromQueue()
                 self?.enforcePlaybackRateIfPlaying(reason: "poll")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -533,6 +548,15 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func syncShuffleStatus() {
         isShuffleEnabled = player.state.shuffleMode == .songs
+    }
+
+    private func setRepeatEnabled(_ enabled: Bool) {
+        player.state.repeatMode = enabled ? .all : MusicPlayer.RepeatMode.none
+        syncRepeatStatus()
+    }
+
+    private func syncRepeatStatus() {
+        isRepeatEnabled = player.state.repeatMode == .all || player.state.repeatMode == .one
     }
 
     private func ensureAuthorization() async -> MusicAuthorization.Status {

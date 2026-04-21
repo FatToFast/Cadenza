@@ -19,6 +19,7 @@ struct PlayerView: View {
     @State private var seekPreviewProgress = 0.0
     @State private var isSeekingPlayback = false
     @State private var localPlaylist = LocalFilePlaylist()
+    @State private var isLocalRepeatEnabled = false
 
     var body: some View {
         ZStack {
@@ -488,14 +489,12 @@ struct PlayerView: View {
                         action: handleLocalPlaylistShuffleToggle
                     )
 
-                    if localPlaylist.count > 1 {
-                        circularPlaybackButton(
-                            systemImage: "backward.fill",
-                            accessibilityLabel: "이전 MP3",
-                            isDisabled: !localPlaylist.canMovePrevious || audio.state == .loading,
-                            action: handleLocalPlaylistPrevious
-                        )
-                    }
+                    circularPlaybackButton(
+                        systemImage: "backward.fill",
+                        accessibilityLabel: "이전 MP3",
+                        isDisabled: !localPlaylist.canMovePrevious || audio.state == .loading,
+                        action: handleLocalPlaylistPrevious
+                    )
                 }
 
                 Button(action: handlePrimaryPlayback) {
@@ -518,12 +517,26 @@ struct PlayerView: View {
                         isDisabled: streaming.isLoading,
                         action: handleStreamingNext
                     )
-                } else if localPlaylist.count > 1 {
+                    circularToggleButton(
+                        systemImage: "repeat",
+                        accessibilityLabel: streaming.isRepeatEnabled ? "Apple Music 반복 끄기" : "Apple Music 반복 켜기",
+                        isOn: streaming.isRepeatEnabled,
+                        isDisabled: !streaming.canRepeat || streaming.isLoading,
+                        action: handleStreamingRepeatToggle
+                    )
+                } else {
                     circularPlaybackButton(
                         systemImage: "forward.fill",
                         accessibilityLabel: "다음 MP3",
                         isDisabled: !localPlaylist.canMoveNext || audio.state == .loading,
                         action: handleLocalPlaylistNext
+                    )
+                    circularToggleButton(
+                        systemImage: "repeat",
+                        accessibilityLabel: isLocalRepeatEnabled ? "반복 끄기" : "반복 켜기",
+                        isOn: isLocalRepeatEnabled,
+                        isDisabled: !hasLocalPlaybackItem || audio.state == .loading,
+                        action: handleLocalRepeatToggle
                     )
                 }
             }
@@ -708,6 +721,10 @@ struct PlayerView: View {
         }
     }
 
+    private var hasLocalPlaybackItem: Bool {
+        !streaming.hasSong && (audio.hasLoadedTrack || !localPlaylist.isEmpty)
+    }
+
     // MARK: - Error Banner (DESIGN.md 2.2.2)
 
     private func errorBanner(message: String) -> some View {
@@ -745,6 +762,7 @@ struct PlayerView: View {
             clearLocalPlaylist()
             Task {
                 await audio.loadFile(url: url)
+                updateLocalPlaylistEndBehavior()
             }
         case .failure(let error):
             let nsError = error as NSError
@@ -782,6 +800,7 @@ struct PlayerView: View {
         clearLocalPlaylist()
         Task {
             await audio.loadSampleTrack(preset)
+            updateLocalPlaylistEndBehavior()
         }
     }
 
@@ -799,6 +818,7 @@ struct PlayerView: View {
                     artist: track.artist,
                     bpmHint: track.beatsPerMinute.map(Double.init)
                 )
+                updateLocalPlaylistEndBehavior()
             } catch {
                 audio.presentError(error.localizedDescription)
             }
@@ -862,6 +882,10 @@ struct PlayerView: View {
         streaming.toggleShuffle()
     }
 
+    private func handleStreamingRepeatToggle() {
+        streaming.toggleRepeat()
+    }
+
     private func handleLocalPlaylistNext() {
         let shouldAutoPlay = audio.state == .playing
         guard let item = localPlaylist.moveToNext() else { return }
@@ -885,9 +909,21 @@ struct PlayerView: View {
         updateLocalPlaylistEndBehavior()
     }
 
+    private func handleLocalRepeatToggle() {
+        isLocalRepeatEnabled.toggle()
+        updateLocalPlaylistEndBehavior()
+    }
+
     private func handleLocalPlaylistTrackEnded() {
         guard !localPlaylist.isEmpty else { return }
         guard let item = localPlaylist.moveToNext() else {
+            if isLocalRepeatEnabled, let firstItem = localPlaylist.moveToStart() {
+                updateLocalPlaylistEndBehavior()
+                Task {
+                    await loadLocalPlaylistItem(firstItem, autoPlay: true)
+                }
+                return
+            }
             updateLocalPlaylistEndBehavior()
             return
         }
@@ -908,11 +944,15 @@ struct PlayerView: View {
 
     private func clearLocalPlaylist() {
         localPlaylist = LocalFilePlaylist()
-        audio.playbackEndBehavior = .loop
+        updateLocalPlaylistEndBehavior()
     }
 
     private func updateLocalPlaylistEndBehavior() {
-        audio.playbackEndBehavior = localPlaylist.isEmpty ? .loop : .notify
+        if localPlaylist.isEmpty {
+            audio.playbackEndBehavior = isLocalRepeatEnabled ? .loop : .notify
+        } else {
+            audio.playbackEndBehavior = .notify
+        }
     }
 
     private func syncStreamingMetronome() {
