@@ -8,6 +8,7 @@ struct PlaylistSummary: Identifiable, Sendable, Equatable {
 
 struct AppleMusicTrack: Identifiable, Sendable, Equatable {
     let id: String
+    let appleMusicID: String?
     let persistentID: UInt64
     let title: String
     let artist: String?

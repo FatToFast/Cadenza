@@ -5,9 +5,11 @@ final class StreamingBPMResolverTests: XCTestCase {
     func testUsesGetSongBPMBeforePreviewAnalysis() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(
-            getSongBPM: { title, artist in
+            getSongBPM: { title, artist, appleMusicID, isrc in
                 XCTAssertEqual(title, "달리기")
                 XCTAssertEqual(artist, "S.E.S.")
+                XCTAssertEqual(appleMusicID, "12345")
+                XCTAssertNil(isrc)
                 return GetSongBPMService.Result(
                     bpm: 103,
                     matchedArtist: "S.E.S.",
@@ -25,7 +27,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             shouldTryGetSongBPM: true,
             shouldTryPreviewAnalysis: true,
             title: "달리기",
-            artist: "S.E.S."
+            artist: "S.E.S.",
+            appleMusicID: "12345"
         )
 
         let previewCallCount = await previewCounter.count
@@ -45,7 +48,7 @@ final class StreamingBPMResolverTests: XCTestCase {
             confidence: nil
         )
         let resolver = StreamingBPMResolver(
-            getSongBPM: { _, _ in
+            getSongBPM: { _, _, _, _ in
                 XCTFail("GetSongBPM should not be called")
                 return nil
             },
@@ -60,7 +63,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             shouldTryGetSongBPM: false,
             shouldTryPreviewAnalysis: true,
             title: "Cached",
-            artist: "Artist"
+            artist: "Artist",
+            appleMusicID: nil
         )
 
         let previewCallCount = await previewCounter.count
@@ -72,7 +76,7 @@ final class StreamingBPMResolverTests: XCTestCase {
     func testFallsBackToPreviewAnalysisWhenGetSongBPMHasNoMatch() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(
-            getSongBPM: { _, _ in nil },
+            getSongBPM: { _, _, _, _ in nil },
             previewAnalysis: {
                 await previewCounter.increment()
                 return Self.previewAnalysis(bpm: 94)
@@ -84,7 +88,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             shouldTryGetSongBPM: true,
             shouldTryPreviewAnalysis: true,
             title: "Unknown",
-            artist: "Nobody"
+            artist: "Nobody",
+            appleMusicID: nil
         )
 
         let previewCallCount = await previewCounter.count
@@ -104,7 +109,7 @@ final class StreamingBPMResolverTests: XCTestCase {
             confidence: nil
         )
         let resolver = StreamingBPMResolver(
-            getSongBPM: { _, _ in
+            getSongBPM: { _, _, _, _ in
                 GetSongBPMService.Result(
                     bpm: 103,
                     matchedArtist: "Artist",
@@ -122,7 +127,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             shouldTryGetSongBPM: true,
             shouldTryPreviewAnalysis: true,
             title: "Song",
-            artist: "Artist"
+            artist: "Artist",
+            appleMusicID: nil
         )
 
         XCTAssertEqual(resolution.result?.bpm ?? 0, 103, accuracy: 0.01)
@@ -143,7 +149,7 @@ final class StreamingBPMResolverTests: XCTestCase {
             confidence: nil
         )
         let resolver = StreamingBPMResolver(
-            getSongBPM: { _, _ in nil },
+            getSongBPM: { _, _, _, _ in nil },
             previewAnalysis: {
                 await previewCounter.increment()
                 return Self.previewAnalysis(bpm: 68.67)
@@ -155,7 +161,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             shouldTryGetSongBPM: false,
             shouldTryPreviewAnalysis: true,
             title: "Song",
-            artist: "Artist"
+            artist: "Artist",
+            appleMusicID: nil
         )
 
         XCTAssertEqual(resolution.result?.bpm ?? 0, 103, accuracy: 0.01)

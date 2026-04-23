@@ -47,6 +47,25 @@ enum OriginalBPMSource: Sendable, Equatable {
     }
 }
 
+enum ExternalBPMOctaveNormalizer {
+    private static let doubleTimeThreshold = 160.0
+    private static let halfTimeMin = 80.0
+    private static let halfTimeMax = 115.0
+
+    static func normalized(_ bpm: Double) -> Double {
+        guard bpm.isFinite, bpm > 0 else { return bpm }
+
+        let halfTimeBPM = bpm / 2.0
+        guard bpm >= doubleTimeThreshold,
+              halfTimeBPM >= halfTimeMin,
+              halfTimeBPM <= halfTimeMax else {
+            return bpm
+        }
+
+        return halfTimeBPM
+    }
+}
+
 enum PlaybackStateRecovery {
     static func stateAfterClearingError(
         currentState: PlaybackState,

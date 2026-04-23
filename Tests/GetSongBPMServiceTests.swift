@@ -88,7 +88,7 @@ final class GetSongBPMServiceTests: XCTestCase {
         _ = await service.lookupBPM(title: "xyzzzz", artist: "nobody")
         _ = await service.lookupBPM(title: "xyzzzz", artist: "nobody")
 
-        XCTAssertEqual(MockURLProtocol.requestCount, 1, "no-result lookups should be cached too")
+        XCTAssertEqual(MockURLProtocol.requestCount, 2, "no-result artist and title-only fallback lookups should be cached too")
     }
 
     func testConcurrentSameLookupSharesInFlightRequest() async {
@@ -144,6 +144,118 @@ final class GetSongBPMServiceTests: XCTestCase {
 
         XCTAssertEqual(result?.bpm, 78)
         XCTAssertEqual(MockURLProtocol.requestCount, 0)
+    }
+
+    func testPersistsFetchedBPMForLaterServiceInstance() async {
+        let suiteName = persistentDefaultsSuiteName
+        clearPersistentDefaults(suiteName: suiteName)
+        defer { clearPersistentDefaults(suiteName: suiteName) }
+
+        MockURLProtocol.responseProvider = { _ in Self.soundchartsSongPayload }
+        MockURLProtocol.requestCount = 0
+        let firstService = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" }
+        )
+
+        let fetched = await firstService.lookupBPM(
+            title: "Ur So F**kinG cOoL",
+            artist: "Tones and I",
+            appleMusicID: "1525348093"
+        )
+        XCTAssertEqual(fetched?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(MockURLProtocol.requestCount, 1)
+
+        MockURLProtocol.responseProvider = { request in
+            XCTFail("Persistent BPM cache should avoid network: \(request.url?.absoluteString ?? "nil")")
+            return nil
+        }
+        MockURLProtocol.requestCount = 0
+
+        let secondService = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" }
+        )
+
+        let cached = await secondService.cachedBPM(
+            title: "Renamed Display Title",
+            artist: "Tones and I",
+            appleMusicID: "1525348093"
+        )
+
+        XCTAssertEqual(cached?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(cached?.matchedArtist, "Tones And I")
+        XCTAssertEqual(MockURLProtocol.requestCount, 0)
+
+        let metadataCached = await secondService.lookupBPM(
+            title: "Ur So F**kinG cOoL",
+            artist: "Tones and I"
+        )
+
+        XCTAssertEqual(metadataCached?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(MockURLProtocol.requestCount, 0)
+    }
+
+    func testSoundchartsDoubleTimeTempoIsNormalizedBeforeCaching() async {
+        MockURLProtocol.responseProvider = { _ in Self.soundchartsDoubleTimeSongPayload }
+        let service = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .none,
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Ghost In A Flower",
+            artist: "Yorushika",
+            appleMusicID: "1500000000"
+        )
+
+        XCTAssertEqual(result?.bpm ?? 0, 89.015, accuracy: 0.001)
+        XCTAssertEqual(result?.matchedArtist, "Yorushika")
+    }
+
+    func testRecordedBPMPersistsForFuturePlaylistLookups() async {
+        let suiteName = persistentDefaultsSuiteName
+        clearPersistentDefaults(suiteName: suiteName)
+        defer { clearPersistentDefaults(suiteName: suiteName) }
+
+        let firstService = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            apiKeyProvider: { nil }
+        )
+
+        await firstService.recordBPM(
+            91.2,
+            title: "Later Confirmed",
+            artist: "Test Artist",
+            appleMusicID: "12345",
+            isrc: "USRC17607839"
+        )
+
+        let secondService = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            apiKeyProvider: { nil }
+        )
+
+        let cachedByAppleMusicID = await secondService.cachedBPM(
+            title: "Renamed Playlist Row",
+            artist: "Test Artist",
+            appleMusicID: "12345"
+        )
+        XCTAssertEqual(cachedByAppleMusicID?.bpm ?? 0, 91.2, accuracy: 0.001)
+
+        let cachedByMetadata = await secondService.cachedBPM(
+            title: "Later Confirmed",
+            artist: "Test Artist"
+        )
+        XCTAssertEqual(cachedByMetadata?.bpm ?? 0, 91.2, accuracy: 0.001)
     }
 
     func testDefaultPrefetchRunsSeriallyToAvoidPlaybackContention() async {
@@ -232,6 +344,32 @@ final class GetSongBPMServiceTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requestCount, 2)
     }
 
+    func testFallsBackToTitleOnlyWhenArtistFilteredLookupHasNoResult() async {
+        MockURLProtocol.responseProvider = { request in
+            let lookup = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "lookup" })?
+                .value
+
+            if lookup == "song:Hello" {
+                return Self.adeleHelloPayload
+            }
+
+            return #"{"search":{"error":"no result"}}"#.data(using: .utf8)!
+        }
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "test-key" }
+        )
+
+        let result = await service.lookupBPM(title: "Hello", artist: "Adele feat. Someone")
+
+        XCTAssertEqual(result?.bpm, 78)
+        XCTAssertEqual(result?.matchedArtist, "Adele")
+        XCTAssertEqual(MockURLProtocol.requestCount, 3)
+    }
+
     func testUsesCuratedOverrideWithoutNetworkLookup() async {
         MockURLProtocol.stubResponse = Self.sesRunningWithoutTempoPayload
         MockURLProtocol.requestCount = 0
@@ -264,6 +402,170 @@ final class GetSongBPMServiceTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requestCount, 0)
     }
 
+    func testUsesSoundchartsAppleMusicIDBeforeSongstatsAndGetSongBPM() async {
+        MockURLProtocol.responseProvider = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-app-id"), "soundcharts-app")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "soundcharts-key")
+            XCTAssertEqual(request.url?.path, "/api/v2.25/song/by-platform/apple-music/1525348093")
+            return Self.soundchartsSongPayload
+        }
+        MockURLProtocol.requestCount = 0
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "getsong-key" },
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" },
+            songstatsAPIKeyProvider: { "songstats-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Ur So F**kinG cOoL",
+            artist: "Tones and I",
+            appleMusicID: "1525348093"
+        )
+
+        XCTAssertEqual(result?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(result?.matchedArtist, "Tones And I")
+        XCTAssertEqual(result?.matchedTitle, "Ur So F**kinG cOoL")
+        XCTAssertEqual(MockURLProtocol.requestCount, 1)
+    }
+
+    func testUsesSoundchartsISRCWhenAppleMusicIDIsPlaylistEntryID() async {
+        MockURLProtocol.responseProvider = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-app-id"), "soundcharts-app")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "soundcharts-key")
+            XCTAssertEqual(request.url?.path, "/api/v2.25/song/by-isrc/USAT21906968")
+            return Self.soundchartsSongPayload
+        }
+        MockURLProtocol.requestCount = 0
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "getsong-key" },
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" },
+            songstatsAPIKeyProvider: { "songstats-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Ur So F**kinG cOoL",
+            artist: "Tones and I",
+            appleMusicID: "i.ABCDEF123",
+            isrc: "usat21906968"
+        )
+
+        XCTAssertEqual(result?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(MockURLProtocol.requestCount, 1)
+    }
+
+    func testUsesSpotifySearchISRCBeforeSongstatsAndGetSongBPM() async {
+        MockURLProtocol.responseProvider = { request in
+            switch request.url?.path {
+            case "/api/token":
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertTrue(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Basic ") == true)
+                return Self.spotifyTokenPayload
+            case "/v1/search":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer spotify-token")
+                let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                XCTAssertEqual(queryItems?.first(where: { $0.name == "q" })?.value, "track:Ur So F**kinG cOoL artist:Tones and I")
+                XCTAssertEqual(queryItems?.first(where: { $0.name == "type" })?.value, "track")
+                return Self.spotifySearchPayload
+            case "/api/v2.25/song/by-isrc/USAT21906968":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-app-id"), "soundcharts-app")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "soundcharts-key")
+                return Self.soundchartsSongPayload
+            default:
+                XCTFail("Unexpected Spotify/Soundcharts URL: \(request.url?.absoluteString ?? "nil")")
+                return nil
+            }
+        }
+        MockURLProtocol.requestCount = 0
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "getsong-key" },
+            soundchartsAppIDProvider: { "soundcharts-app" },
+            soundchartsAPIKeyProvider: { "soundcharts-key" },
+            songstatsAPIKeyProvider: { "songstats-key" },
+            spotifyClientIDProvider: { "spotify-client-id" },
+            spotifyClientSecretProvider: { "spotify-client-secret" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Ur So F**kinG cOoL",
+            artist: "Tones and I",
+            appleMusicID: "i.ABCDEF123"
+        )
+
+        XCTAssertEqual(result?.bpm ?? 0, 78.97, accuracy: 0.001)
+        XCTAssertEqual(MockURLProtocol.requestCount, 3)
+    }
+
+    func testUsesSongstatsAppleMusicIDBeforeSearchAndGetSongBPM() async {
+        MockURLProtocol.responseProvider = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "apikey"), "songstats-key")
+            XCTAssertEqual(request.url?.path, "/enterprise/v1/tracks/info")
+            let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            XCTAssertEqual(queryItems?.first(where: { $0.name == "apple_music_track_id" })?.value, "1525348093")
+            return Self.songstatsTrackInfoPayload
+        }
+        MockURLProtocol.requestCount = 0
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "getsong-key" },
+            soundchartsAppIDProvider: { nil },
+            soundchartsAPIKeyProvider: { nil },
+            songstatsAPIKeyProvider: { "songstats-key" }
+        )
+
+        let result = await service.lookupBPM(
+            title: "Mr. Brightside",
+            artist: "Don Diablo",
+            appleMusicID: "1525348093"
+        )
+
+        XCTAssertEqual(result?.bpm ?? 0, 126.093, accuracy: 0.001)
+        XCTAssertEqual(result?.matchedArtist, "Don Diablo")
+        XCTAssertEqual(result?.matchedTitle, "Mr. Brightside")
+        XCTAssertEqual(MockURLProtocol.requestCount, 1)
+    }
+
+    func testUsesSongstatsSearchThenTrackInfoWhenAppleMusicIDMissing() async {
+        MockURLProtocol.responseProvider = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "apikey"), "songstats-key")
+            switch request.url?.path {
+            case "/enterprise/v1/tracks/search":
+                let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                XCTAssertEqual(queryItems?.first(where: { $0.name == "q" })?.value, "Mr. Brightside Don Diablo")
+                return Self.songstatsSearchPayload
+            case "/enterprise/v1/tracks/info":
+                let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                XCTAssertEqual(queryItems?.first(where: { $0.name == "songstats_track_id" })?.value, "k4bp9etx")
+                return Self.songstatsTrackInfoPayload
+            default:
+                XCTFail("Unexpected Songstats URL: \(request.url?.absoluteString ?? "nil")")
+                return nil
+            }
+        }
+        MockURLProtocol.requestCount = 0
+
+        let service = GetSongBPMService(
+            session: makeSession(),
+            apiKeyProvider: { "getsong-key" },
+            soundchartsAppIDProvider: { nil },
+            soundchartsAPIKeyProvider: { nil },
+            songstatsAPIKeyProvider: { "songstats-key" }
+        )
+
+        let result = await service.lookupBPM(title: "Mr. Brightside", artist: "Don Diablo")
+
+        XCTAssertEqual(result?.bpm ?? 0, 126.093, accuracy: 0.001)
+        XCTAssertEqual(MockURLProtocol.requestCount, 2)
+    }
+
     func testHttpErrorReturnsNil() async {
         MockURLProtocol.stubStatusCode = 500
         MockURLProtocol.stubResponse = Data("Internal Server Error".utf8)
@@ -281,6 +583,14 @@ final class GetSongBPMServiceTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+
+    private var persistentDefaultsSuiteName: String {
+        "CadenzaTests.GetSongBPMService.\(name)"
+    }
+
+    private func clearPersistentDefaults(suiteName: String) {
+        UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
     }
 
     private static let adeleHelloPayload: Data = #"""
@@ -304,6 +614,100 @@ final class GetSongBPMServiceTests: XCTestCase {
       {"id":"ses-running","title":"달리기","tempo":"",
        "artist":{"name":"S.E.S."}}
     ]}
+    """#.data(using: .utf8)!
+
+    private static let soundchartsSongPayload: Data = #"""
+    {
+      "type": "song",
+      "object": {
+        "uuid": "2ffc5f25-f191-4551-a1b4-40fe9ddcc075",
+        "name": "Ur So F**kinG cOoL",
+        "creditName": "Tones And I",
+        "mainArtists": [{"name": "Tones and I"}],
+        "audio": {
+          "tempo": 78.97
+        }
+      }
+    }
+    """#.data(using: .utf8)!
+
+    private static let soundchartsDoubleTimeSongPayload: Data = #"""
+    {
+      "type": "song",
+      "object": {
+        "uuid": "ghost-in-a-flower",
+        "name": "Ghost In A Flower",
+        "creditName": "Yorushika",
+        "mainArtists": [{"name": "Yorushika"}],
+        "audio": {
+          "tempo": 178.03
+        }
+      }
+    }
+    """#.data(using: .utf8)!
+
+    private static let spotifyTokenPayload: Data = #"""
+    {
+      "access_token": "spotify-token",
+      "token_type": "Bearer",
+      "expires_in": 3600
+    }
+    """#.data(using: .utf8)!
+
+    private static let spotifySearchPayload: Data = #"""
+    {
+      "tracks": {
+        "items": [
+          {
+            "id": "wrong",
+            "name": "Dance Monkey",
+            "artists": [{"name": "Other Artist"}],
+            "external_ids": {"isrc": "USRC17607839"}
+          },
+          {
+            "id": "right",
+            "name": "Ur So F**kinG cOoL",
+            "artists": [{"name": "Tones and I"}],
+            "external_ids": {"isrc": "USAT21906968"}
+          }
+        ]
+      }
+    }
+    """#.data(using: .utf8)!
+
+    private static let songstatsSearchPayload: Data = #"""
+    {
+      "result": "success",
+      "message": "Data Retrieved.",
+      "results": [
+        {
+          "songstats_track_id": "other",
+          "title": "Mr. Brightside",
+          "artists": [{"name": "The Killers"}]
+        },
+        {
+          "songstats_track_id": "k4bp9etx",
+          "title": "Mr. Brightside",
+          "artists": [{"name": "Don Diablo"}]
+        }
+      ]
+    }
+    """#.data(using: .utf8)!
+
+    private static let songstatsTrackInfoPayload: Data = #"""
+    {
+      "result": "success",
+      "message": "Data Retrieved.",
+      "track_info": {
+        "songstats_track_id": "k4bp9etx",
+        "title": "Mr. Brightside",
+        "artists": [{"name": "Don Diablo"}]
+      },
+      "audio_analysis": [
+        {"key": "tempo", "value": "126.093"},
+        {"key": "key", "value": "C#"}
+      ]
+    }
     """#.data(using: .utf8)!
 }
 

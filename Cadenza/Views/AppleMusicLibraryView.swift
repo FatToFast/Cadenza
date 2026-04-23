@@ -10,6 +10,8 @@ struct AppleMusicLibraryView: View {
     @State private var authorizationStatus: MPMediaLibraryAuthorizationStatus
     @State private var playlists: [PlaylistSummary] = []
     @State private var tracksByPlaylist: [UInt64: [AppleMusicTrack]] = [:]
+    @State private var resolvedBPMByTrackID: [String: Int] = [:]
+    @State private var bpmLookupAttemptedTrackIDs: Set<String> = []
     @State private var loadingMessage: String?
     @State private var errorMessage: String?
 
@@ -176,9 +178,17 @@ struct AppleMusicLibraryView: View {
                             }
                         }
                         Spacer()
-                        if let bpm = track.beatsPerMinute {
+                        if let bpm = displayBPM(for: track) {
                             Text("\(bpm) BPM")
                                 .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else if !bpmLookupAttemptedTrackIDs.contains(track.id) {
+                            Text("BPM 조회 중")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("BPM 미확인")
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -220,10 +230,42 @@ struct AppleMusicLibraryView: View {
     private func loadTracksIfNeeded(for playlist: PlaylistSummary) async {
         guard tracksByPlaylist[playlist.id] == nil else { return }
         do {
-            tracksByPlaylist[playlist.id] = try await library.fetchTracks(in: playlist.id)
+            let tracks = try await library.fetchTracks(in: playlist.id)
+            tracksByPlaylist[playlist.id] = tracks
+            preloadMissingBPMs(for: tracks)
         } catch {
             tracksByPlaylist[playlist.id] = []
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func displayBPM(for track: AppleMusicTrack) -> Int? {
+        track.beatsPerMinute ?? resolvedBPMByTrackID[track.id]
+    }
+
+    private func preloadMissingBPMs(for tracks: [AppleMusicTrack]) {
+        let pendingTracks = tracks.filter { track in
+            track.beatsPerMinute == nil &&
+                resolvedBPMByTrackID[track.id] == nil &&
+                !bpmLookupAttemptedTrackIDs.contains(track.id)
+        }
+        guard !pendingTracks.isEmpty else { return }
+
+        Task(priority: .utility) {
+            for track in pendingTracks {
+                let result = await GetSongBPMService.shared.lookupBPM(
+                    title: track.title,
+                    artist: track.artist,
+                    appleMusicID: track.appleMusicID
+                )
+
+                await MainActor.run {
+                    if let result {
+                        resolvedBPMByTrackID[track.id] = Int(result.bpm.rounded())
+                    }
+                    bpmLookupAttemptedTrackIDs.insert(track.id)
+                }
+            }
         }
     }
 }

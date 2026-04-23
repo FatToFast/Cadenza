@@ -63,13 +63,15 @@ struct PlayerView: View {
 
                             playbackProgressSection
                                 .padding(.horizontal, 20)
+                        }
 
+                        if audio.hasLoadedTrack || streaming.hasSong {
                             Divider().background(Color.cadenzaDivider)
 
                             originalBPMControls
                                 .padding(.horizontal, 20)
 
-                            if audio.hasBeatAlignmentAnalysis {
+                            if audio.hasBeatAlignmentAnalysis && !streaming.hasSong {
                                 Divider().background(Color.cadenzaDivider)
 
                                 syncDebugSection
@@ -427,7 +429,7 @@ struct PlayerView: View {
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextPrimary)
                 Spacer()
-                if audio.needsOriginalBPMInput {
+                if needsOriginalBPMInput {
                     Text("입력 권장")
                         .font(.cadenzaCaption)
                         .foregroundColor(.cadenzaWarning)
@@ -453,7 +455,7 @@ struct PlayerView: View {
 
             Text(nowPlaying.originalBPMSource.helperText)
                 .font(.cadenzaCaption)
-                .foregroundColor(audio.needsOriginalBPMInput ? .cadenzaWarning : .cadenzaTextSecondary)
+                .foregroundColor(needsOriginalBPMInput ? .cadenzaWarning : .cadenzaTextSecondary)
         }
     }
 
@@ -837,8 +839,8 @@ struct PlayerView: View {
             audio.pause()
         }
         Task {
-            await streaming.play(song, playbackRate: audio.playbackRate)
-            syncStreamingMetronome()
+            await streaming.play(song, playbackRate: 1.0)
+            applyStreamingTempoAndAlignment()
         }
     }
 
@@ -853,10 +855,10 @@ struct PlayerView: View {
             await streaming.play(
                 playlist: playlist,
                 startingAt: entry,
-                playbackRate: audio.playbackRate,
+                playbackRate: 1.0,
                 preloadedEntries: entries
             )
-            syncStreamingMetronome()
+            applyStreamingTempoAndAlignment()
         }
     }
 
@@ -874,14 +876,14 @@ struct PlayerView: View {
 
     private func handleStreamingNext() {
         Task {
-            await streaming.skipToNext(playbackRate: audio.playbackRate)
+            await streaming.skipToNext(playbackRate: 1.0)
             applyStreamingTempoAndAlignment()
         }
     }
 
     private func handleStreamingPrevious() {
         Task {
-            await streaming.skipToPrevious(playbackRate: audio.playbackRate)
+            await streaming.skipToPrevious(playbackRate: 1.0)
             applyStreamingTempoAndAlignment()
         }
     }
@@ -980,6 +982,7 @@ struct PlayerView: View {
             beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
             beatTimesSeconds: streaming.currentBeatTimesSeconds
         )
+        streaming.applyPlaybackRate(audio.playbackRate)
         syncStreamingMetronome()
     }
 
@@ -1002,6 +1005,13 @@ struct PlayerView: View {
         return bpm >= BPMRange.originalMin && bpm <= BPMRange.originalMax
     }
 
+    private var needsOriginalBPMInput: Bool {
+        if streaming.hasSong {
+            return audio.originalBPMSource == .assumedDefault
+        }
+        return audio.needsOriginalBPMInput
+    }
+
     private func syncOriginalBPMText() {
         originalBPMText = "\(Int(audio.originalBPM.rounded()))"
     }
@@ -1011,7 +1021,13 @@ struct PlayerView: View {
             audio.presentError("원본 BPM은 30~300 사이 숫자로 입력하세요")
             return
         }
-        audio.setOriginalBPM(bpm)
+
+        if streaming.hasSong {
+            guard streaming.setManualBPM(bpm) else { return }
+            applyStreamingTempoAndAlignment(bpm: bpm)
+        } else {
+            audio.setOriginalBPM(bpm)
+        }
     }
 
     private func debugMetric(label: String, value: String) -> some View {

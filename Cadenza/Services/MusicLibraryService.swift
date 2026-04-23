@@ -99,6 +99,7 @@ struct MusicLibraryService: MusicLibrary {
 
         return AppleMusicTrack(
             id: "am-\(item.persistentID)",
+            appleMusicID: item.playbackStoreID.isEmpty ? nil : item.playbackStoreID,
             persistentID: item.persistentID,
             title: title,
             artist: item.artist,
@@ -124,6 +125,7 @@ struct MusicLibraryService: MusicLibrary {
         return [
             AppleMusicTrack(
                 id: "simulator-kickdrum-rocket",
+                appleMusicID: nil,
                 persistentID: UInt64.max - 100,
                 title: "Kickdrum Rocket",
                 artist: "Simulator Fixture",

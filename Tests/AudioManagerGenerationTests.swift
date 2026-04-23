@@ -26,4 +26,17 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(info.originalBPM, BPMRange.originalDefault)
         XCTAssertNil(info.queueContext)
     }
+
+    func testStreamingBeatAlignmentForNinetyBPMKeepsPlaybackRateNearOne() {
+        let audio = AudioManager()
+
+        audio.setStreamingBeatAlignment(
+            bpm: 89.96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.targetBPM, 90)
+        XCTAssertEqual(audio.playbackRate, 90 / 89.96, accuracy: 0.0001)
+    }
 }

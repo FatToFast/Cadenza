@@ -20,8 +20,16 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>GetSongBPMApiKey</key>
 	<string>$(GETSONGBPM_API_KEY)</string>
+	<key>SoundchartsAppID</key>
+	<string>$(SOUNDCHARTS_APP_ID)</string>
+	<key>SoundchartsApiKey</key>
+	<string>$(SOUNDCHARTS_API_KEY)</string>
+	<key>SongstatsApiKey</key>
+	<string>$(SONGSTATS_API_KEY)</string>
 	<key>SpotifyClientID</key>
 	<string>$(SPOTIFY_CLIENT_ID)</string>
+	<key>SpotifyClientSecret</key>
+	<string>$(SPOTIFY_CLIENT_SECRET)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>

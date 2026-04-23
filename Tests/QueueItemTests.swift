@@ -17,6 +17,7 @@ final class QueueItemTests: XCTestCase {
     func testAppleMusicSourceIdentityUsesStableTrackID() {
         let track = AppleMusicTrack(
             id: "am-42",
+            appleMusicID: "123456789",
             persistentID: 42,
             title: "Song",
             artist: "Artist",

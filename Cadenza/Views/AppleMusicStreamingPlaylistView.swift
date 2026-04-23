@@ -9,7 +9,9 @@ struct AppleMusicStreamingPlaylistView: View {
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var playlists: [Playlist] = []
     @State private var entriesByPlaylist: [MusicItemID: [Playlist.Entry]] = [:]
-    @State private var cadenceFitsByEntryID: [MusicItemID: RunningCadenceFit] = [:]
+    @State private var bpmByEntryID: [String: Int] = [:]
+    @State private var cadenceFitsByEntryID: [String: RunningCadenceFit] = [:]
+    @State private var bpmLookupAttemptedEntryIDs: Set<String> = []
     @State private var hiddenEntryIDs: Set<MusicItemID> = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -149,7 +151,7 @@ struct AppleMusicStreamingPlaylistView: View {
 
                         Spacer(minLength: 8)
 
-                        cadenceFitBadge(for: entry)
+                        bpmBadge(for: entry)
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -188,7 +190,7 @@ struct AppleMusicStreamingPlaylistView: View {
             let detailedPlaylist = try await playlist.with(.entries)
             let entries = Array(detailedPlaylist.entries ?? [])
             entriesByPlaylist[playlist.id] = entries
-            analyzeRunningCadenceFit(for: entries)
+            preloadBPMs(for: entries)
         } catch {
             entriesByPlaylist[playlist.id] = []
             errorMessage = "곡 목록을 불러오지 못했습니다: \(error.localizedDescription)"
@@ -196,81 +198,133 @@ struct AppleMusicStreamingPlaylistView: View {
     }
 
     @ViewBuilder
-    private func cadenceFitBadge(for entry: Playlist.Entry) -> some View {
-        if let fit = cadenceFitsByEntryID[entry.id] {
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(fit.badgeText)
+    private func bpmBadge(for entry: Playlist.Entry) -> some View {
+        let entryID = entry.id.rawValue
+        VStack(alignment: .trailing, spacing: 3) {
+            if let bpm = bpmByEntryID[entryID] {
+                Text("\(bpm) BPM")
                     .font(.cadenzaCaption)
-                    .foregroundColor(color(for: fit.status))
+                    .foregroundColor(.cadenzaAccent)
                     .lineLimit(1)
+            } else if bpmLookupAttemptedEntryIDs.contains(entryID) {
+                Text("BPM 미확인")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            } else {
+                Text("BPM 조회 중")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
 
+            if let fit = cadenceFitsByEntryID[entryID], fit.originalBPM != nil {
                 Text(fit.detailText)
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            .frame(minWidth: 82, alignment: .trailing)
-        } else {
-            Text("분석 중")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .frame(minWidth: 82, alignment: .trailing)
         }
+        .frame(minWidth: 86, alignment: .trailing)
     }
 
-    private func analyzeRunningCadenceFit(for entries: [Playlist.Entry]) {
-        let pendingEntries = entries.filter { cadenceFitsByEntryID[$0.id] == nil }
-        guard !pendingEntries.isEmpty else { return }
+    private func preloadBPMs(for entries: [Playlist.Entry]) {
+        let lookups = entries
+            .map(bpmLookup(for:))
+            .filter { lookup in
+                bpmByEntryID[lookup.entryID] == nil &&
+                    !bpmLookupAttemptedEntryIDs.contains(lookup.entryID)
+            }
+        guard !lookups.isEmpty else { return }
 
         Task(priority: .utility) {
-            for entry in pendingEntries {
-                let bpm = await GetSongBPMService.shared.lookupBPM(
-                    title: entry.title,
-                    artist: entry.artistName
-                )?.bpm
-                let previewSignal = await previewSignal(for: entry)
-                let fit = RunningCadenceFit.evaluate(
-                    originalBPM: bpm,
-                    previewSignal: previewSignal
-                )
-                await MainActor.run {
-                    cadenceFitsByEntryID[entry.id] = fit
+            var uncachedLookups: [PlaylistEntryBPMLookup] = []
+
+            for lookup in lookups {
+                if let cached = await GetSongBPMService.shared.cachedBPM(
+                    title: lookup.title,
+                    artist: lookup.artist,
+                    appleMusicID: lookup.appleMusicID,
+                    isrc: lookup.isrc
+                ) {
+                    await MainActor.run {
+                        applyBPM(cached.bpm, for: lookup)
+                        bpmLookupAttemptedEntryIDs.insert(lookup.entryID)
+                    }
+                } else {
+                    uncachedLookups.append(lookup)
+                }
+            }
+
+            guard !uncachedLookups.isEmpty else { return }
+
+            await withTaskGroup(of: (PlaylistEntryBPMLookup, Double?).self) { group in
+                var nextIndex = 0
+                let requestLimit = min(4, uncachedLookups.count)
+
+                func enqueueNext() {
+                    guard nextIndex < uncachedLookups.count else { return }
+                    let lookup = uncachedLookups[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        let bpm = await GetSongBPMService.shared.lookupBPM(
+                            title: lookup.title,
+                            artist: lookup.artist,
+                            appleMusicID: lookup.appleMusicID,
+                            isrc: lookup.isrc
+                        )?.bpm
+                        return (lookup, bpm)
+                    }
+                }
+
+                for _ in 0..<requestLimit {
+                    enqueueNext()
+                }
+
+                while let (lookup, bpm) = await group.next() {
+                    await MainActor.run {
+                        if let bpm {
+                            applyBPM(bpm, for: lookup)
+                        }
+                        bpmLookupAttemptedEntryIDs.insert(lookup.entryID)
+                    }
+                    enqueueNext()
                 }
             }
         }
     }
 
-    private func previewSignal(for entry: Playlist.Entry) async -> RunningPreviewSignal? {
-        guard let previewAsset = entry.previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil }) else {
-            return nil
-        }
-        guard let analysis = await PreviewBPMAnalyzer.shared.estimateBeatAlignment(
-            directURL: previewAsset.url,
-            hlsURL: previewAsset.hlsURL,
-            title: entry.title,
-            artist: entry.artistName
-        ) else {
-            return nil
+    private func applyBPM(_ bpm: Double, for lookup: PlaylistEntryBPMLookup) {
+        bpmByEntryID[lookup.entryID] = Int(bpm.rounded())
+        cadenceFitsByEntryID[lookup.entryID] = RunningCadenceFit.evaluate(originalBPM: bpm)
+    }
+
+    private func bpmLookup(for entry: Playlist.Entry) -> PlaylistEntryBPMLookup {
+        if case .song(let song)? = entry.item {
+            return PlaylistEntryBPMLookup(
+                entryID: entry.id.rawValue,
+                appleMusicID: song.id.rawValue,
+                isrc: song.isrc,
+                title: song.title,
+                artist: song.artistName
+            )
         }
 
-        return RunningPreviewSignal(
-            confidence: analysis.confidence,
-            beatTimesSeconds: analysis.beatTimesSeconds ?? []
+        return PlaylistEntryBPMLookup(
+            entryID: entry.id.rawValue,
+            appleMusicID: entry.id.rawValue,
+            isrc: entry.isrc,
+            title: entry.title,
+            artist: entry.artistName
         )
     }
 
-    private func color(for status: RunningCadenceFitStatus) -> Color {
-        switch status {
-        case .excellent:
-            return .cadenzaAccent
-        case .usable:
-            return .cadenzaTextSecondary
-        case .awkward:
-            return .cadenzaWarning
-        case .unsuitable:
-            return .cadenzaWarning
-        case .unknown:
-            return .cadenzaTextTertiary
-        }
-    }
+}
+
+private struct PlaylistEntryBPMLookup: Sendable, Hashable {
+    let entryID: String
+    let appleMusicID: String?
+    let isrc: String?
+    let title: String
+    let artist: String?
 }

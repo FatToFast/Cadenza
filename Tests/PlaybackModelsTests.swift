@@ -264,6 +264,17 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(resolved ?? 0, 74.90, accuracy: 0.01)
     }
 
+    func testExternalBPMOctaveNormalizerHalvesLikelyDoubleTimeValues() {
+        XCTAssertEqual(ExternalBPMOctaveNormalizer.normalized(178.03), 89.015, accuracy: 0.001)
+        XCTAssertEqual(ExternalBPMOctaveNormalizer.normalized(207.79), 103.895, accuracy: 0.001)
+    }
+
+    func testExternalBPMOctaveNormalizerKeepsOrdinaryAndClearlyFastValues() {
+        XCTAssertEqual(ExternalBPMOctaveNormalizer.normalized(146), 146, accuracy: 0.001)
+        XCTAssertEqual(ExternalBPMOctaveNormalizer.normalized(78.97), 78.97, accuracy: 0.001)
+        XCTAssertEqual(ExternalBPMOctaveNormalizer.normalized(250), 250, accuracy: 0.001)
+    }
+
     func testRunningCadenceFitRecognizesNinetyAsNaturalDoubleTime() {
         let fit = RunningCadenceFit.evaluate(originalBPM: 90)
 

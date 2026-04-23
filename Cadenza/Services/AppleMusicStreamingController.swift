@@ -19,7 +19,7 @@ struct StreamingBPMResolution: Equatable, Sendable {
 }
 
 struct StreamingBPMResolver: Sendable {
-    typealias GetSongBPMLookup = @Sendable (_ title: String, _ artist: String?) async -> GetSongBPMService.Result?
+    typealias GetSongBPMLookup = @Sendable (_ title: String, _ artist: String?, _ appleMusicID: String?, _ isrc: String?) async -> GetSongBPMService.Result?
     typealias PreviewAnalysisLookup = @Sendable () async -> BeatAlignmentAnalysis?
 
     let getSongBPM: GetSongBPMLookup
@@ -30,10 +30,12 @@ struct StreamingBPMResolver: Sendable {
         shouldTryGetSongBPM: Bool,
         shouldTryPreviewAnalysis: Bool,
         title: String,
-        artist: String?
+        artist: String?,
+        appleMusicID: String?,
+        isrc: String? = nil
     ) async -> StreamingBPMResolution {
         if shouldTryGetSongBPM,
-           let external = await getSongBPM(title, artist) {
+           let external = await getSongBPM(title, artist, appleMusicID, isrc) {
             return StreamingBPMResolution(
                 result: StreamingBPMResult(
                     bpm: external.bpm,
@@ -212,9 +214,12 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func seedBPMCacheFromPrefetchedLookups(_ entries: [Playlist.Entry]) async {
         for entry in entries {
+            let lookup = trackLookup(for: entry)
             guard let result = await GetSongBPMService.shared.cachedBPM(
-                title: entry.title,
-                artist: entry.artistName
+                title: lookup.title,
+                artist: lookup.artist,
+                appleMusicID: lookup.appleMusicID,
+                isrc: lookup.isrc
             ) else { continue }
             cacheBPMResult(
                 StreamingBPMResult(
@@ -224,7 +229,7 @@ final class AppleMusicStreamingController: ObservableObject {
                     beatTimesSeconds: nil,
                     confidence: nil
                 ),
-                songID: entry.id.rawValue,
+                songID: lookup.appleMusicID,
                 title: entry.title,
                 artist: entry.artistName,
                 albumTitle: entry.albumTitle
@@ -235,12 +240,28 @@ final class AppleMusicStreamingController: ObservableObject {
     private func startPlaylistBPMPreload(_ entries: [Playlist.Entry]) {
         guard !entries.isEmpty else { return }
 
+        logger.notice("[bpm_preload] start entries=\(entries.count)")
+        print("[bpm_preload] start entries=\(entries.count)")
         Task(priority: .utility) { [weak self] in
             for entry in entries {
-                guard let result = await GetSongBPMService.shared.lookupBPM(
+                let lookup = self?.trackLookup(for: entry) ?? GetSongBPMService.TrackLookup(
+                    appleMusicID: entry.id.rawValue,
+                    isrc: entry.isrc,
                     title: entry.title,
                     artist: entry.artistName
-                ) else { continue }
+                )
+                guard let result = await GetSongBPMService.shared.lookupBPM(
+                    title: lookup.title,
+                    artist: lookup.artist,
+                    appleMusicID: lookup.appleMusicID,
+                    isrc: lookup.isrc
+                ) else {
+                    await MainActor.run { [weak self] in
+                        self?.logger.notice("[bpm_preload] empty title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public)")
+                        print("[bpm_preload] empty title=\(entry.title) artist=\(entry.artistName)")
+                    }
+                    continue
+                }
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
@@ -253,7 +274,7 @@ final class AppleMusicStreamingController: ObservableObject {
                     )
                     self.cacheBPMResult(
                         bpmResult,
-                        songID: entry.id.rawValue,
+                        songID: lookup.appleMusicID,
                         title: entry.title,
                         artist: entry.artistName,
                         albumTitle: entry.albumTitle
@@ -261,9 +282,29 @@ final class AppleMusicStreamingController: ObservableObject {
                     if self.currentTitle == entry.title && self.currentArtist == entry.artistName {
                         self.applyResolvedBPM(bpmResult)
                     }
+                    self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
+                    print("[bpm_preload] success title=\(entry.title) artist=\(entry.artistName) bpm=\(result.bpm)")
                 }
             }
         }
+    }
+
+    private nonisolated func trackLookup(for entry: Playlist.Entry) -> GetSongBPMService.TrackLookup {
+        if case .song(let song)? = entry.item {
+            return GetSongBPMService.TrackLookup(
+                appleMusicID: song.id.rawValue,
+                isrc: song.isrc,
+                title: song.title,
+                artist: song.artistName
+            )
+        }
+
+        return GetSongBPMService.TrackLookup(
+            appleMusicID: entry.id.rawValue,
+            isrc: entry.isrc,
+            title: entry.title,
+            artist: entry.artistName
+        )
     }
 
     func togglePlayback(playbackRate: Double) async {
@@ -332,6 +373,46 @@ final class AppleMusicStreamingController: ObservableObject {
         desiredPlaybackRate = Float(clamped)
         guard isPlaying || player.state.playbackStatus == .playing else { return }
         enforcePlaybackRate(reason: "requested")
+    }
+
+    @discardableResult
+    func setManualBPM(_ bpm: Double) -> Bool {
+        guard bpm.isFinite, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+            errorMessage = "원본 BPM은 30~300 사이 숫자로 입력하세요"
+            return false
+        }
+        guard let identity = currentBPMIdentity() else {
+            errorMessage = "BPM을 저장할 곡 정보가 없습니다"
+            return false
+        }
+
+        let result = StreamingBPMResult(
+            bpm: bpm,
+            source: .manual,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil
+        )
+        cacheBPMResult(
+            result,
+            songID: identity.songID,
+            title: identity.title,
+            artist: identity.artist,
+            albumTitle: identity.albumTitle
+        )
+        applyResolvedBPM(result)
+        errorMessage = nil
+
+        Task {
+            await GetSongBPMService.shared.recordBPM(
+                bpm,
+                title: identity.title,
+                artist: identity.artist,
+                appleMusicID: identity.songID,
+                isrc: identity.isrc
+            )
+        }
+        return true
     }
 
     private enum SkipDirection {
@@ -530,6 +611,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private func startPreviewBPMAnalysisIfNeeded(for song: Song) {
         startPreviewBPMAnalysisIfNeeded(
             songID: song.id.rawValue,
+            isrc: song.isrc,
             title: song.title,
             artist: song.artistName,
             albumTitle: song.albumTitle,
@@ -545,6 +627,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
         startPreviewBPMAnalysisIfNeeded(
             songID: entry.id.rawValue,
+            isrc: entry.isrc,
             title: entry.title,
             artist: entry.artistName,
             albumTitle: entry.albumTitle,
@@ -565,6 +648,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func startPreviewBPMAnalysisIfNeeded(
         songID: String?,
+        isrc: String?,
         title: String,
         artist: String?,
         albumTitle: String?,
@@ -588,8 +672,13 @@ final class AppleMusicStreamingController: ObservableObject {
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = Task { @MainActor [weak self] in
             let resolver = StreamingBPMResolver(
-                getSongBPM: { title, artist in
-                    await GetSongBPMService.shared.lookupBPM(title: title, artist: artist)
+                getSongBPM: { title, artist, _, isrc in
+                    await GetSongBPMService.shared.lookupBPM(
+                        title: title,
+                        artist: artist,
+                        appleMusicID: songID,
+                        isrc: isrc
+                    )
                 },
                 previewAnalysis: {
                     await PreviewBPMAnalyzer.shared.estimateBeatAlignment(
@@ -605,7 +694,9 @@ final class AppleMusicStreamingController: ObservableObject {
                 shouldTryGetSongBPM: shouldTryGetSongBPM,
                 shouldTryPreviewAnalysis: cachedResult == nil,
                 title: title,
-                artist: artist
+                artist: artist,
+                appleMusicID: songID,
+                isrc: isrc
             )
             guard !Task.isCancelled else { return }
             guard let self else { return }
@@ -621,6 +712,13 @@ final class AppleMusicStreamingController: ObservableObject {
             }
             self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
             self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: nil)] = result
+            await GetSongBPMService.shared.recordBPM(
+                result.bpm,
+                title: title,
+                artist: artist,
+                appleMusicID: songID,
+                isrc: isrc
+            )
 
             if self.currentTitle == title && (artist == nil || self.currentArtist == artist) {
                 self.applyResolvedBPM(result)
@@ -641,6 +739,63 @@ final class AppleMusicStreamingController: ObservableObject {
         }
         bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
         bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: nil)] = result
+    }
+
+    private func currentBPMIdentity() -> (
+        songID: String?,
+        isrc: String?,
+        title: String,
+        artist: String?,
+        albumTitle: String?
+    )? {
+        if let currentSong {
+            return (
+                songID: currentSong.id.rawValue,
+                isrc: currentSong.isrc,
+                title: currentSong.title,
+                artist: currentSong.artistName,
+                albumTitle: currentSong.albumTitle
+            )
+        }
+
+        if let entry = player.queue.currentEntry {
+            if case .song(let song)? = entry.item {
+                return (
+                    songID: song.id.rawValue,
+                    isrc: song.isrc,
+                    title: song.title,
+                    artist: song.artistName,
+                    albumTitle: song.albumTitle
+                )
+            }
+
+            if let song = entry.transientItem as? Song {
+                return (
+                    songID: song.id.rawValue,
+                    isrc: song.isrc,
+                    title: song.title,
+                    artist: song.artistName,
+                    albumTitle: song.albumTitle
+                )
+            }
+
+            return (
+                songID: entry.id,
+                isrc: nil,
+                title: entry.title,
+                artist: artistName(for: entry) ?? entry.subtitle,
+                albumTitle: nil
+            )
+        }
+
+        guard let currentTitle else { return nil }
+        return (
+            songID: nil,
+            isrc: nil,
+            title: currentTitle,
+            artist: currentArtist,
+            albumTitle: nil
+        )
     }
 
     private func reapplyPlaybackRateAfterStartup() {
