@@ -18,6 +18,17 @@
 
 ## Implementation Plan
 
+### Task 0: Run external beat tracker spike
+
+**Files:**
+- Reference: `docs/plans/2026-04-23-beat-tracker-library-spike.md`
+
+**Steps:**
+- Treat external beat tracking as a benchmark before adding app dependencies.
+- Do not embed GPL/AGPL libraries in the app target.
+- Use preview/local audio only; do not assume Apple Music playback exposes PCM samples.
+- Use the spike results to decide whether the built-in analyzer is sufficient after reliability gating.
+
 ### Task 1: Add beat-sync reliability model
 
 **Files:**
