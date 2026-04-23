@@ -114,13 +114,16 @@ final class AudioManager: ObservableObject {
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
     var hasLoadedTrack: Bool { audioFile != nil }
-    var canStartPlayback: Bool { audioFile != nil || metronomeEnabled }
+    var canStartPlayback: Bool { audioFile != nil || canRunMetronomeForCurrentBeatSync }
     var needsOriginalBPMInput: Bool { audioFile != nil && originalBPMSource == .assumedDefault }
     var playbackProgress: Double {
         guard trackDuration > 0 else { return 0 }
         return min(max(currentPlaybackTime / trackDuration, 0), 1)
     }
     var hasBeatAlignmentAnalysis: Bool { beatAlignmentAnalysis != nil }
+    var canRunMetronomeForCurrentBeatSync: Bool {
+        metronomeEnabled && beatSyncStatus.usesBeatGrid
+    }
     var effectiveBeatOffset: TimeInterval {
         let beatDuration = 60.0 / max(originalBPM, 1)
         return BeatOffsetAdjustment.effectiveOffset(
@@ -501,7 +504,7 @@ final class AudioManager: ObservableObject {
 
     func play() {
         let canResumeTrack = state == .ready || state == .paused
-        let canStartMetronomeOnly = state == .idle && audioFile == nil && metronomeEnabled
+        let canStartMetronomeOnly = state == .idle && audioFile == nil && canRunMetronomeForCurrentBeatSync
         guard canResumeTrack || canStartMetronomeOnly else { return }
         guard canStartPlayback else { return }
 
@@ -522,7 +525,7 @@ final class AudioManager: ObservableObject {
                 playerNode.play(at: playbackAnchor)
                 startProgressUpdates()
             }
-            if metronomeEnabled {
+            if canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: sourceTime,
                     anchorHostTime: playbackAnchor.hostTime
@@ -562,6 +565,10 @@ final class AudioManager: ObservableObject {
 
     func startExternalMetronomePlayback(alignedToSourceTime sourceTime: TimeInterval = 0) {
         guard metronomeEnabled else {
+            stopExternalMetronomePlayback()
+            return
+        }
+        guard canRunMetronomeForCurrentBeatSync else {
             stopExternalMetronomePlayback()
             return
         }
@@ -639,7 +646,7 @@ final class AudioManager: ObservableObject {
                 switch self.playbackEndBehavior {
                 case .loop:
                     self.scheduleLoop()
-                    if self.metronomeEnabled {
+                    if self.canRunMetronomeForCurrentBeatSync {
                         self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
                     }
                     logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
@@ -674,6 +681,7 @@ final class AudioManager: ObservableObject {
         originalBPMSource = .manual
         beatSyncStatus = .bpmOnly
         beatSyncIssue = .missingBeatGrid
+        stopMetronomeIfBeatSyncRejected()
         sourceBeatOffsetSeconds = 0
         sourceBeatTimesSeconds = []
         errorMessage = nil
@@ -697,6 +705,7 @@ final class AudioManager: ObservableObject {
             originalBPMSource = .assumedDefault
             beatSyncStatus = .needsConfirmation
             beatSyncIssue = .missingBPM
+            stopMetronomeIfBeatSyncRejected()
             sourceBeatOffsetSeconds = 0
             sourceBeatTimesSeconds = []
             applyAutomaticTargetBPM()
@@ -713,6 +722,7 @@ final class AudioManager: ObservableObject {
         )
         beatSyncStatus = assessment.status
         beatSyncIssue = assessment.issue
+        stopMetronomeIfBeatSyncRejected()
         if assessment.shouldUseBeatGrid, let beatOffsetSeconds {
             let beatDuration = 60.0 / max(bpm, 1)
             sourceBeatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
@@ -743,7 +753,7 @@ final class AudioManager: ObservableObject {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
             applyBeatSyncAssessment(from: updated)
-            if state == .playing, metronomeEnabled {
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -761,7 +771,7 @@ final class AudioManager: ObservableObject {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
             applyBeatSyncAssessment(from: updated)
-            if state == .playing, metronomeEnabled {
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -785,7 +795,7 @@ final class AudioManager: ObservableObject {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
             applyBeatSyncAssessment(from: updated)
-            if state == .playing, metronomeEnabled {
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -820,7 +830,7 @@ final class AudioManager: ObservableObject {
             let playbackAnchor = makePlaybackAnchor()
             playerNode.play(at: playbackAnchor)
             startProgressUpdates()
-            if metronomeEnabled {
+            if canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentPlaybackTime,
                     anchorHostTime: playbackAnchor.hostTime
@@ -881,11 +891,21 @@ final class AudioManager: ObservableObject {
 
     private func restartMetronomeIfNeeded() {
         guard isMetronomeRunning, metronomeEnabled else { return }
+        guard canRunMetronomeForCurrentBeatSync else {
+            stopMetronome()
+            return
+        }
         guard !isExternalMetronomePlaybackActive else { return }
         startMetronome(
             alignedToSourceTime: currentSourcePlaybackTime(),
             anchorHostTime: mach_absolute_time()
         )
+    }
+
+    private func stopMetronomeIfBeatSyncRejected() {
+        guard !beatSyncStatus.usesBeatGrid else { return }
+        isExternalMetronomePlaybackActive = false
+        stopMetronome()
     }
 
     /// playerNode → timePitch → mixer 경로와 metronomeNode → mixer 경로의 지연 차이를 캐시한다.
@@ -906,7 +926,10 @@ final class AudioManager: ObservableObject {
         alignedToSourceTime sourceTime: TimeInterval = 0,
         anchorHostTime: UInt64
     ) {
-        guard metronomeEnabled else { return }
+        guard canRunMetronomeForCurrentBeatSync else {
+            stopMetronome()
+            return
+        }
 
         stopMetronome()
         let gridPlan = BeatGridSyncPlanner.planNextBeat(
@@ -1077,6 +1100,7 @@ final class AudioManager: ObservableObject {
         )
         beatSyncStatus = assessment.status
         beatSyncIssue = assessment.issue
+        stopMetronomeIfBeatSyncRejected()
         sourceBeatOffsetSeconds = assessment.shouldUseBeatGrid ? effectiveOffset(for: analysis) : 0
         sourceBeatTimesSeconds = assessment.shouldUseBeatGrid ? effectiveTimes : []
     }

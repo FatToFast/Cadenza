@@ -502,7 +502,7 @@ struct PlayerView: View {
             HStack {
                 beatSyncMetric(label: "신뢰도", value: beatSyncConfidenceLabel)
                 Spacer(minLength: 16)
-                beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "BPM 기준")
+                beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "미실행")
             }
 
             Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
@@ -641,7 +641,7 @@ struct PlayerView: View {
                 }
             }
 
-            if audio.metronomeEnabled && (audio.state == .playing || streaming.isPlaying) {
+            if audio.metronomeEnabled && currentBeatSyncStatus.usesBeatGrid && (audio.state == .playing || streaming.isPlaying) {
                 Label("메트로놈 동작 중", systemImage: "metronome")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
@@ -943,7 +943,10 @@ struct PlayerView: View {
     }
 
     private func syncStreamingMetronome() {
-        guard streaming.hasSong, streaming.isPlaying, audio.metronomeEnabled else {
+        guard streaming.hasSong,
+              streaming.isPlaying,
+              audio.metronomeEnabled,
+              streaming.currentBeatSyncStatus.usesBeatGrid else {
             audio.stopExternalMetronomePlayback()
             return
         }

@@ -192,11 +192,11 @@ final class PlaybackModelsTests: XCTestCase {
     func testBeatSyncStatusHelperExplainsBPMOnlyReasonsSeparately() {
         XCTAssertEqual(
             BeatSyncStatus.bpmOnly.helperText(issue: .missingBeatGrid),
-            "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 BPM 기준으로 재생합니다."
+            "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 메트로놈을 실행하지 않습니다."
         )
         XCTAssertEqual(
             BeatSyncStatus.bpmOnly.helperText(issue: .lowConfidence),
-            "분석 신뢰도가 낮아 BPM 기준으로만 메트로놈을 재생합니다."
+            "분석 신뢰도가 낮아 메트로놈을 실행하지 않습니다."
         )
     }
 
