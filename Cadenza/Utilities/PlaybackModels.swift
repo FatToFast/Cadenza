@@ -313,11 +313,22 @@ enum BeatSyncStatus: Sendable, Equatable {
     }
 
     var helperText: String {
+        helperText(issue: nil)
+    }
+
+    func helperText(issue: BeatSyncReliabilityIssue?) -> String {
         switch self {
         case .automaticBeatSync:
             return "분석한 박자 위치에 맞춰 메트로놈을 시작합니다."
         case .bpmOnly:
-            return "박자 위치 신뢰도가 낮아 BPM 기준으로만 메트로놈을 재생합니다."
+            switch issue {
+            case .lowConfidence:
+                return "분석 신뢰도가 낮아 BPM 기준으로만 메트로놈을 재생합니다."
+            case .missingBeatGrid:
+                return "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 BPM 기준으로 재생합니다."
+            case .missingBPM, .unstableBeatGrid, .none:
+                return "자동 박자 위치를 쓰지 않고 BPM 기준으로 메트로놈을 재생합니다."
+            }
         case .needsConfirmation:
             return "BPM 또는 박자 정보를 더 확인해야 합니다."
         case .unstableBeatGrid:

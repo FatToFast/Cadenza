@@ -12,6 +12,7 @@ struct StreamingBPMResult: Equatable, Sendable {
     let beatTimesSeconds: [TimeInterval]?
     let confidence: Double?
     let beatSyncStatus: BeatSyncStatus
+    let beatSyncIssue: BeatSyncReliabilityIssue?
 }
 
 struct StreamingBPMResolution: Equatable, Sendable {
@@ -44,7 +45,8 @@ struct StreamingBPMResolver: Sendable {
                     beatOffsetSeconds: nil,
                     beatTimesSeconds: nil,
                     confidence: nil,
-                    beatSyncStatus: .bpmOnly
+                    beatSyncStatus: .bpmOnly,
+                    beatSyncIssue: .missingBeatGrid
                 ),
                 didAttemptGetSongBPM: true
             )
@@ -77,7 +79,8 @@ struct StreamingBPMResolver: Sendable {
                 beatOffsetSeconds: assessment.shouldUseBeatGrid ? analysis.beatOffsetSeconds : nil,
                 beatTimesSeconds: assessment.shouldUseBeatGrid ? analysis.beatTimesSeconds : nil,
                 confidence: analysis.confidence,
-                beatSyncStatus: assessment.status
+                beatSyncStatus: assessment.status,
+                beatSyncIssue: assessment.issue
             ),
             didAttemptGetSongBPM: shouldTryGetSongBPM
         )
@@ -95,6 +98,7 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var currentBeatTimesSeconds: [TimeInterval] = []
     @Published private(set) var currentBeatAlignmentConfidence: Double?
     @Published private(set) var currentBeatSyncStatus: BeatSyncStatus = .needsConfirmation
+    @Published private(set) var currentBeatSyncIssue: BeatSyncReliabilityIssue? = .missingBPM
     @Published private(set) var isPlaying = false
     @Published private(set) var isLoading = false
     @Published private(set) var canShuffle = false
@@ -237,7 +241,8 @@ final class AppleMusicStreamingController: ObservableObject {
                     beatOffsetSeconds: nil,
                     beatTimesSeconds: nil,
                     confidence: nil,
-                    beatSyncStatus: .bpmOnly
+                    beatSyncStatus: .bpmOnly,
+                    beatSyncIssue: .missingBeatGrid
                 ),
                 songID: lookup.appleMusicID,
                 title: entry.title,
@@ -281,7 +286,8 @@ final class AppleMusicStreamingController: ObservableObject {
                         beatOffsetSeconds: nil,
                         beatTimesSeconds: nil,
                         confidence: nil,
-                        beatSyncStatus: .bpmOnly
+                        beatSyncStatus: .bpmOnly,
+                        beatSyncIssue: .missingBeatGrid
                     )
                     self.cacheBPMResult(
                         bpmResult,
@@ -369,6 +375,7 @@ final class AppleMusicStreamingController: ObservableObject {
         currentBeatTimesSeconds = []
         currentBeatAlignmentConfidence = nil
         currentBeatSyncStatus = .needsConfirmation
+        currentBeatSyncIssue = .missingBPM
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = nil
         activePreviewAnalysisKey = nil
@@ -404,7 +411,8 @@ final class AppleMusicStreamingController: ObservableObject {
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
             confidence: nil,
-            beatSyncStatus: .bpmOnly
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
         )
         cacheBPMResult(
             result,
@@ -597,7 +605,8 @@ final class AppleMusicStreamingController: ObservableObject {
                 beatOffsetSeconds: nil,
                 beatTimesSeconds: nil,
                 confidence: nil,
-                beatSyncStatus: .bpmOnly
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
             )
 
             if !item.playbackStoreID.isEmpty {
@@ -621,6 +630,7 @@ final class AppleMusicStreamingController: ObservableObject {
         currentBeatTimesSeconds = result?.beatTimesSeconds ?? []
         currentBeatAlignmentConfidence = result?.confidence
         currentBeatSyncStatus = result?.beatSyncStatus ?? .needsConfirmation
+        currentBeatSyncIssue = result?.beatSyncIssue ?? .missingBPM
     }
 
     private func startPreviewBPMAnalysisIfNeeded(for song: Song) {

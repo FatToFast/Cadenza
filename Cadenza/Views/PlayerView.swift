@@ -505,7 +505,7 @@ struct PlayerView: View {
                 beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "BPM 기준")
             }
 
-            Text(currentBeatSyncStatus.helperText)
+            Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
         }
@@ -1021,6 +1021,10 @@ struct PlayerView: View {
 
     private var currentBeatSyncStatus: BeatSyncStatus {
         streaming.hasSong ? streaming.currentBeatSyncStatus : audio.beatSyncStatus
+    }
+
+    private var currentBeatSyncIssue: BeatSyncReliabilityIssue? {
+        streaming.hasSong ? streaming.currentBeatSyncIssue : audio.beatSyncIssue
     }
 
     private var beatSyncConfidenceLabel: String {

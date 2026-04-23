@@ -93,6 +93,7 @@ final class AudioManager: ObservableObject {
     @Published private(set) var beatAlignmentConfidence: Double?
     @Published private(set) var beatAlignmentCacheStatus: BeatAlignmentCacheStatus = .none
     @Published private(set) var beatSyncStatus: BeatSyncStatus = .needsConfirmation
+    @Published private(set) var beatSyncIssue: BeatSyncReliabilityIssue? = .missingBPM
     @Published private(set) var manualBeatOffsetNudge: TimeInterval = 0
     @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
         didSet { handleMetronomeEnabledChange() }
@@ -368,6 +369,7 @@ final class AudioManager: ObservableObject {
         beatAlignmentConfidence = nil
         beatAlignmentCacheStatus = .none
         beatSyncStatus = .needsConfirmation
+        beatSyncIssue = .missingBPM
         manualBeatOffsetNudge = 0
         sourceBeatOffsetSeconds = 0
         sourceBeatTimesSeconds = []
@@ -407,12 +409,14 @@ final class AudioManager: ObservableObject {
                 _bpmFromMetadata = true
                 originalBPMSource = .metadata
                 beatSyncStatus = .bpmOnly
+                beatSyncIssue = .missingBeatGrid
                 logger.info("[track_loaded] BPM from metadata: \(bpm)")
             } else {
                 originalBPM = BPMRange.originalDefault
                 _bpmFromMetadata = false
                 originalBPMSource = .assumedDefault
                 beatSyncStatus = .needsConfirmation
+                beatSyncIssue = .missingBPM
                 logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
             }
 
@@ -447,6 +451,7 @@ final class AudioManager: ObservableObject {
             originalBPM = BPMRange.originalDefault
             originalBPMSource = .assumedDefault
             beatSyncStatus = .needsConfirmation
+            beatSyncIssue = .missingBPM
             state = .error
             errorMessage = Self.userFacingLoadError(for: url)
             // 로드 실패 시 권한도 반납
@@ -480,6 +485,7 @@ final class AudioManager: ObservableObject {
                     originalBPMSource = .preset
                     if sourceBeatTimesSeconds.isEmpty {
                         beatSyncStatus = .bpmOnly
+                        beatSyncIssue = .missingBeatGrid
                     }
                     applyAutomaticTargetBPM()
                 }
@@ -667,6 +673,7 @@ final class AudioManager: ObservableObject {
         _bpmFromMetadata = false
         originalBPMSource = .manual
         beatSyncStatus = .bpmOnly
+        beatSyncIssue = .missingBeatGrid
         sourceBeatOffsetSeconds = 0
         sourceBeatTimesSeconds = []
         errorMessage = nil
@@ -689,6 +696,7 @@ final class AudioManager: ObservableObject {
             _bpmFromMetadata = false
             originalBPMSource = .assumedDefault
             beatSyncStatus = .needsConfirmation
+            beatSyncIssue = .missingBPM
             sourceBeatOffsetSeconds = 0
             sourceBeatTimesSeconds = []
             applyAutomaticTargetBPM()
@@ -704,6 +712,7 @@ final class AudioManager: ObservableObject {
             beatTimesSeconds: beatTimesSeconds ?? []
         )
         beatSyncStatus = assessment.status
+        beatSyncIssue = assessment.issue
         if assessment.shouldUseBeatGrid, let beatOffsetSeconds {
             let beatDuration = 60.0 / max(bpm, 1)
             sourceBeatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
@@ -1067,6 +1076,7 @@ final class AudioManager: ObservableObject {
             beatTimesSeconds: effectiveTimes
         )
         beatSyncStatus = assessment.status
+        beatSyncIssue = assessment.issue
         sourceBeatOffsetSeconds = assessment.shouldUseBeatGrid ? effectiveOffset(for: analysis) : 0
         sourceBeatTimesSeconds = assessment.shouldUseBeatGrid ? effectiveTimes : []
     }

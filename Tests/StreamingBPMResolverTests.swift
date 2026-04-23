@@ -46,7 +46,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
             confidence: nil,
-            beatSyncStatus: .bpmOnly
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in
@@ -108,7 +109,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
             confidence: nil,
-            beatSyncStatus: .bpmOnly
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in
@@ -149,7 +151,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
             confidence: nil,
-            beatSyncStatus: .bpmOnly
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in nil },
