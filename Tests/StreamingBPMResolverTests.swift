@@ -45,7 +45,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             source: .metadata,
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
-            confidence: nil
+            confidence: nil,
+            beatSyncStatus: .bpmOnly
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in
@@ -106,7 +107,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             source: .metadata,
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
-            confidence: nil
+            confidence: nil,
+            beatSyncStatus: .bpmOnly
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in
@@ -146,7 +148,8 @@ final class StreamingBPMResolverTests: XCTestCase {
             source: .metadata,
             beatOffsetSeconds: nil,
             beatTimesSeconds: nil,
-            confidence: nil
+            confidence: nil,
+            beatSyncStatus: .bpmOnly
         )
         let resolver = StreamingBPMResolver(
             getSongBPM: { _, _, _, _ in nil },
@@ -172,7 +175,90 @@ final class StreamingBPMResolverTests: XCTestCase {
         XCTAssertEqual(previewCallCount, 0)
     }
 
-    private static func previewAnalysis(bpm: Double) -> BeatAlignmentAnalysis {
+    func testPreviewAnalysisKeepsBeatGridWhenReliable() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: {
+                Self.previewAnalysis(
+                    bpm: 120,
+                    confidence: 0.72,
+                    beatTimesSeconds: [0.12, 0.62, 1.12, 1.62]
+                )
+            }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: nil,
+            shouldTryGetSongBPM: false,
+            shouldTryPreviewAnalysis: true,
+            title: "Reliable",
+            artist: "Artist",
+            appleMusicID: nil
+        )
+
+        XCTAssertEqual(resolution.result?.beatSyncStatus, .automaticBeatSync)
+        XCTAssertEqual(resolution.result?.beatOffsetSeconds, 0.12)
+        XCTAssertEqual(resolution.result?.beatTimesSeconds, [0.12, 0.62, 1.12, 1.62])
+    }
+
+    func testPreviewAnalysisDropsBeatGridWhenConfidenceIsLow() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: {
+                Self.previewAnalysis(
+                    bpm: 120,
+                    confidence: 0.21,
+                    beatTimesSeconds: [0.12, 0.62, 1.12, 1.62]
+                )
+            }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: nil,
+            shouldTryGetSongBPM: false,
+            shouldTryPreviewAnalysis: true,
+            title: "Low Confidence",
+            artist: "Artist",
+            appleMusicID: nil
+        )
+
+        XCTAssertEqual(resolution.result?.bpm, 120)
+        XCTAssertEqual(resolution.result?.beatSyncStatus, .bpmOnly)
+        XCTAssertNil(resolution.result?.beatOffsetSeconds)
+        XCTAssertNil(resolution.result?.beatTimesSeconds)
+    }
+
+    func testPreviewAnalysisDropsBeatGridWhenIntervalsAreUnstable() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: {
+                Self.previewAnalysis(
+                    bpm: 120,
+                    confidence: 0.8,
+                    beatTimesSeconds: [0.0, 0.5, 1.18, 1.47, 2.1]
+                )
+            }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: nil,
+            shouldTryGetSongBPM: false,
+            shouldTryPreviewAnalysis: true,
+            title: "Unstable",
+            artist: "Artist",
+            appleMusicID: nil
+        )
+
+        XCTAssertEqual(resolution.result?.beatSyncStatus, .unstableBeatGrid)
+        XCTAssertNil(resolution.result?.beatOffsetSeconds)
+        XCTAssertNil(resolution.result?.beatTimesSeconds)
+    }
+
+    private static func previewAnalysis(
+        bpm: Double,
+        confidence: Double = 0.7,
+        beatTimesSeconds: [TimeInterval] = [0.12, 0.76, 1.40]
+    ) -> BeatAlignmentAnalysis {
         BeatAlignmentAnalysis(
             fingerprint: BeatAlignmentFingerprint(
                 fileSize: 1,
@@ -181,9 +267,9 @@ final class StreamingBPMResolverTests: XCTestCase {
             ),
             estimatedBPM: bpm,
             beatOffsetSeconds: 0.12,
-            confidence: 0.7,
+            confidence: confidence,
             manualNudgeSeconds: 0,
-            beatTimesSeconds: [0.12, 0.76, 1.40]
+            beatTimesSeconds: beatTimesSeconds
         )
     }
 }

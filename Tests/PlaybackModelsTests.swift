@@ -115,6 +115,80 @@ final class PlaybackModelsTests: XCTestCase {
         )
     }
 
+    func testBeatSyncReliabilityAcceptsConfidentStableBeatGrid() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.74,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .automaticBeatSync)
+        XCTAssertNil(assessment.issue)
+        XCTAssertTrue(assessment.shouldUseBeatGrid)
+        XCTAssertEqual(assessment.beatCount, 4)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyForLowConfidence() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.21,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .lowConfidence)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityRejectsUnstableBeatGrid() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.8,
+            beatTimesSeconds: [0.0, 0.5, 1.18, 1.47, 2.1]
+        )
+
+        XCTAssertEqual(assessment.status, .unstableBeatGrid)
+        XCTAssertEqual(assessment.issue, .unstableBeatGrid)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyWhenGridIsMissing() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.9,
+            beatTimesSeconds: []
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .missingBeatGrid)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyWhenGridHasTooFewBeats() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.9,
+            beatTimesSeconds: [0.0, 0.5, 1.0]
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .missingBeatGrid)
+        XCTAssertEqual(assessment.beatCount, 3)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityNeedsConfirmationWhenBPMIsMissing() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: nil,
+            confidence: 0.9,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .needsConfirmation)
+        XCTAssertEqual(assessment.issue, .missingBPM)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
     func testClearingErrorLeavesNonErrorStateUntouched() {
         XCTAssertEqual(
             PlaybackStateRecovery.stateAfterClearingError(

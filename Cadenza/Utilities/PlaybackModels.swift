@@ -293,6 +293,167 @@ enum RunningCadenceRiskReason: Sendable, Equatable {
     case unstableBeatGrid
 }
 
+enum BeatSyncStatus: Sendable, Equatable {
+    case automaticBeatSync
+    case bpmOnly
+    case needsConfirmation
+    case unstableBeatGrid
+
+    var labelText: String {
+        switch self {
+        case .automaticBeatSync:
+            return "자동 박자 맞춤"
+        case .bpmOnly:
+            return "BPM만 맞춤"
+        case .needsConfirmation:
+            return "확인 필요"
+        case .unstableBeatGrid:
+            return "박자 불안정"
+        }
+    }
+
+    var helperText: String {
+        switch self {
+        case .automaticBeatSync:
+            return "분석한 박자 위치에 맞춰 메트로놈을 시작합니다."
+        case .bpmOnly:
+            return "박자 위치 신뢰도가 낮아 BPM 기준으로만 메트로놈을 재생합니다."
+        case .needsConfirmation:
+            return "BPM 또는 박자 정보를 더 확인해야 합니다."
+        case .unstableBeatGrid:
+            return "박자 간격이 불안정해 자동 박자 맞춤을 사용하지 않습니다."
+        }
+    }
+
+    var usesBeatGrid: Bool {
+        self == .automaticBeatSync
+    }
+}
+
+enum BeatSyncReliabilityIssue: Sendable, Equatable {
+    case missingBPM
+    case missingBeatGrid
+    case lowConfidence
+    case unstableBeatGrid
+}
+
+struct BeatSyncAssessment: Sendable, Equatable {
+    let status: BeatSyncStatus
+    let issue: BeatSyncReliabilityIssue?
+    let confidence: Double?
+    let beatIntervalVariation: Double?
+    let beatCount: Int
+
+    var shouldUseBeatGrid: Bool {
+        status.usesBeatGrid
+    }
+}
+
+enum BeatSyncReliability {
+    static let minimumConfidence = 0.35
+    static let maximumBeatIntervalVariation = 0.07
+    static let minimumBeatCount = 4
+
+    static func assess(
+        originalBPM: Double?,
+        confidence: Double?,
+        beatTimesSeconds: [TimeInterval]
+    ) -> BeatSyncAssessment {
+        guard let originalBPM,
+              originalBPM.isFinite,
+              originalBPM > 0 else {
+            return BeatSyncAssessment(
+                status: .needsConfirmation,
+                issue: .missingBPM,
+                confidence: normalizedConfidence(confidence),
+                beatIntervalVariation: nil,
+                beatCount: 0
+            )
+        }
+
+        let beatTimes = sanitizedBeatTimes(beatTimesSeconds)
+        guard beatTimes.count >= minimumBeatCount else {
+            return BeatSyncAssessment(
+                status: .bpmOnly,
+                issue: .missingBeatGrid,
+                confidence: normalizedConfidence(confidence),
+                beatIntervalVariation: nil,
+                beatCount: beatTimes.count
+            )
+        }
+
+        let variation = beatIntervalVariation(for: beatTimes)
+        if let variation,
+           variation > maximumBeatIntervalVariation {
+            return BeatSyncAssessment(
+                status: .unstableBeatGrid,
+                issue: .unstableBeatGrid,
+                confidence: normalizedConfidence(confidence),
+                beatIntervalVariation: variation,
+                beatCount: beatTimes.count
+            )
+        }
+
+        let normalizedConfidence = normalizedConfidence(confidence)
+        if let normalizedConfidence,
+           normalizedConfidence < minimumConfidence {
+            return BeatSyncAssessment(
+                status: .bpmOnly,
+                issue: .lowConfidence,
+                confidence: normalizedConfidence,
+                beatIntervalVariation: variation,
+                beatCount: beatTimes.count
+            )
+        }
+
+        return BeatSyncAssessment(
+            status: .automaticBeatSync,
+            issue: nil,
+            confidence: normalizedConfidence,
+            beatIntervalVariation: variation,
+            beatCount: beatTimes.count
+        )
+    }
+
+    static func beatIntervalVariation(for beatTimesSeconds: [TimeInterval]) -> Double? {
+        let beatTimes = sanitizedBeatTimes(beatTimesSeconds)
+        guard beatTimes.count >= 4 else { return nil }
+
+        let intervals = zip(beatTimes, beatTimes.dropFirst())
+            .map { $1 - $0 }
+            .filter { $0.isFinite && $0 > 0.05 }
+        guard intervals.count >= 3 else { return nil }
+
+        let mean = intervals.reduce(0, +) / Double(intervals.count)
+        guard mean > 0 else { return nil }
+        let variance = intervals.reduce(into: 0.0) { partial, interval in
+            let delta = interval - mean
+            partial += delta * delta
+        } / Double(intervals.count)
+        return sqrt(variance) / mean
+    }
+
+    private static func normalizedConfidence(_ confidence: Double?) -> Double? {
+        guard let confidence, confidence.isFinite else { return nil }
+        return min(max(confidence, 0), 1)
+    }
+
+    private static func sanitizedBeatTimes(_ beatTimesSeconds: [TimeInterval]) -> [TimeInterval] {
+        beatTimesSeconds
+            .filter { $0.isFinite && $0 >= 0 }
+            .sorted()
+            .reduce(into: [TimeInterval]()) { result, beatTime in
+                guard let previous = result.last else {
+                    result.append(beatTime)
+                    return
+                }
+                if beatTime - previous > 0.05 {
+                    result.append(beatTime)
+                }
+            }
+    }
+}
+
 struct RunningPreviewSignal: Sendable, Equatable {
     let confidence: Double?
     let beatTimesSeconds: [TimeInterval]
@@ -436,39 +597,22 @@ struct RunningCadenceFit: Sendable, Equatable {
         to fit: RunningCadenceFit
     ) -> RunningCadenceFit {
         guard let previewSignal else { return fit }
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: fit.originalBPM,
+            confidence: previewSignal.confidence,
+            beatTimesSeconds: previewSignal.beatTimesSeconds
+        )
 
-        if beatIntervalVariation(for: previewSignal.beatTimesSeconds) > 0.07 {
+        if assessment.issue == .unstableBeatGrid {
             return fit.with(status: .unsuitable, riskReason: .unstableBeatGrid)
         }
 
-        if let confidence = previewSignal.confidence,
-           confidence.isFinite,
-           confidence < 0.35,
+        if assessment.issue == .lowConfidence,
            fit.status != .unsuitable {
             return fit.with(status: .awkward, riskReason: .lowConfidence)
         }
 
         return fit
-    }
-
-    private static func beatIntervalVariation(for beatTimesSeconds: [TimeInterval]) -> Double {
-        let beatTimes = beatTimesSeconds
-            .filter { $0.isFinite && $0 >= 0 }
-            .sorted()
-        guard beatTimes.count >= 4 else { return 0 }
-
-        let intervals = zip(beatTimes, beatTimes.dropFirst())
-            .map { $1 - $0 }
-            .filter { $0.isFinite && $0 > 0.05 }
-        guard intervals.count >= 3 else { return 0 }
-
-        let mean = intervals.reduce(0, +) / Double(intervals.count)
-        guard mean > 0 else { return 0 }
-        let variance = intervals.reduce(into: 0.0) { partial, interval in
-            let delta = interval - mean
-            partial += delta * delta
-        } / Double(intervals.count)
-        return sqrt(variance) / mean
     }
 
     private func with(

@@ -71,12 +71,10 @@ struct PlayerView: View {
                             originalBPMControls
                                 .padding(.horizontal, 20)
 
-                            if audio.hasBeatAlignmentAnalysis && !streaming.hasSong {
-                                Divider().background(Color.cadenzaDivider)
+                            Divider().background(Color.cadenzaDivider)
 
-                                syncDebugSection
-                                    .padding(.horizontal, 20)
-                            }
+                            beatSyncStatusSection
+                                .padding(.horizontal, 20)
                         }
 
                         Divider().background(Color.cadenzaDivider)
@@ -166,6 +164,9 @@ struct PlayerView: View {
             applyStreamingTempoAndAlignment()
         }
         .onChange(of: streaming.currentBeatTimesSeconds) { _, _ in
+            applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: streaming.currentBeatSyncStatus) { _, _ in
             applyStreamingTempoAndAlignment()
         }
         .onReceive(audio.trackEndedSubject) { _ in
@@ -486,49 +487,25 @@ struct PlayerView: View {
         .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(nowPlaying.playbackDuration))")
     }
 
-    private var syncDebugSection: some View {
+    private var beatSyncStatusSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Sync Debug")
+                Text("박자 상태")
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextPrimary)
                 Spacer()
-                Text(cacheLabel)
+                Text(currentBeatSyncStatus.labelText)
                     .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaTextSecondary)
+                    .foregroundColor(beatSyncStatusColor)
             }
 
             HStack {
-                debugMetric(label: "Offset", value: "\(Int((audio.effectiveBeatOffset * 1000).rounded()))ms")
-                Spacer()
-                debugMetric(label: "Nudge", value: signedMilliseconds(audio.manualBeatOffsetNudge))
-                Spacer()
-                debugMetric(label: "Confidence", value: confidenceLabel)
+                beatSyncMetric(label: "신뢰도", value: beatSyncConfidenceLabel)
+                Spacer(minLength: 16)
+                beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "BPM 기준")
             }
 
-            HStack(spacing: 10) {
-                Button("지금 맞추기") {
-                    audio.alignBeatOffsetToCurrentTap()
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("-40ms") {
-                    audio.nudgeBeatOffset(by: -40)
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("리셋") {
-                    audio.resetBeatOffsetNudge()
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("+40ms") {
-                    audio.nudgeBeatOffset(by: 40)
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-            }
-
-            Text("분석값이 어긋나면 곡별로 미세 보정되고 다음 재생에도 그대로 적용됩니다.")
+            Text(currentBeatSyncStatus.helperText)
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
         }
@@ -980,7 +957,8 @@ struct PlayerView: View {
             bpm: bpm ?? streaming.currentBPM,
             source: streaming.currentBPMSource ?? .metadata,
             beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
-            beatTimesSeconds: streaming.currentBeatTimesSeconds
+            beatTimesSeconds: streaming.currentBeatTimesSeconds,
+            confidence: streaming.currentBeatAlignmentConfidence
         )
         streaming.applyPlaybackRate(audio.playbackRate)
         syncStreamingMetronome()
@@ -1030,7 +1008,7 @@ struct PlayerView: View {
         }
     }
 
-    private func debugMetric(label: String, value: String) -> some View {
+    private func beatSyncMetric(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.cadenzaCaption)
@@ -1041,25 +1019,27 @@ struct PlayerView: View {
         }
     }
 
-    private var cacheLabel: String {
-        switch audio.beatAlignmentCacheStatus {
-        case .hit:
-            return "cache hit"
-        case .miss:
-            return "cache miss"
-        case .none:
-            return "cache none"
-        }
+    private var currentBeatSyncStatus: BeatSyncStatus {
+        streaming.hasSong ? streaming.currentBeatSyncStatus : audio.beatSyncStatus
     }
 
-    private var confidenceLabel: String {
-        guard let confidence = audio.beatAlignmentConfidence else { return "-" }
+    private var beatSyncConfidenceLabel: String {
+        let confidence = streaming.hasSong
+            ? streaming.currentBeatAlignmentConfidence
+            : audio.beatAlignmentConfidence
+        guard let confidence else { return "-" }
         return "\(Int((confidence * 100).rounded()))%"
     }
 
-    private func signedMilliseconds(_ seconds: TimeInterval) -> String {
-        let milliseconds = Int((seconds * 1000).rounded())
-        return milliseconds >= 0 ? "+\(milliseconds)ms" : "\(milliseconds)ms"
+    private var beatSyncStatusColor: Color {
+        switch currentBeatSyncStatus {
+        case .automaticBeatSync:
+            return .cadenzaAccent
+        case .bpmOnly:
+            return .cadenzaTextSecondary
+        case .needsConfirmation, .unstableBeatGrid:
+            return .cadenzaWarning
+        }
     }
 
     private var displayedPlaybackTime: TimeInterval {
@@ -1090,16 +1070,4 @@ extension UTType {
     static let mp3 = UTType(filenameExtension: "mp3") ?? .audio
     static let mpeg4Audio = UTType("public.mpeg-4-audio") ?? .audio
     static let wav = UTType(filenameExtension: "wav") ?? .audio
-}
-
-private struct SyncNudgeButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.cadenzaCaption)
-            .foregroundColor(.cadenzaTextPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.cadenzaBackgroundSecondary.opacity(configuration.isPressed ? 0.7 : 1))
-            .clipShape(Capsule())
-    }
 }
