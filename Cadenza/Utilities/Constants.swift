@@ -34,7 +34,7 @@ enum MetronomeDefaults {
 extension Color {
     static let cadenzaBackground = Color(hex: 0x0A0A0F)
     static let cadenzaBackgroundSecondary = Color(hex: 0x1A1A22)
-    static let cadenzaAccent = Color(hex: 0xFF4F7A)
+    static let cadenzaAccent = Color(hex: 0x00E5C7)
     static let cadenzaWarning = Color(hex: 0xFF8A3D)
     static let cadenzaTextPrimary = Color(hex: 0xF5F5F7)
     static let cadenzaTextSecondary = Color(hex: 0x9A9AA5)
@@ -52,24 +52,40 @@ extension Color {
     }
 }
 
-// MARK: - Typography (DESIGN.md 4.3)
+// MARK: - Typography (DESIGN.md 4.3, runner-first redesign 2026-04-23)
 
 extension Font {
-    /// BPM 큰 숫자 (96pt, SF Pro Rounded Bold)
-    static let bpmDisplay = Font.system(size: 96, weight: .bold, design: .rounded)
+    /// BPM 디스플레이 (56pt, runner-first에서 96pt → 56pt로 축소)
+    static let bpmDisplay = Font.system(size: 56, weight: .bold, design: .rounded)
 
-    /// 화면 제목 (34pt)
-    static let cadenzaTitle1 = Font.system(size: 34, weight: .bold)
+    /// 화면 제목 (28pt)
+    static let cadenzaTitle1 = Font.system(size: 28, weight: .bold)
 
-    /// 섹션 제목 (22pt)
-    static let cadenzaTitle2 = Font.system(size: 22, weight: .semibold)
+    /// 섹션 제목 (20pt)
+    static let cadenzaTitle2 = Font.system(size: 20, weight: .semibold)
 
-    /// 본문 (17pt)
-    static let cadenzaBody = Font.system(size: 17, weight: .regular)
+    /// 곡 제목 (26pt, 플레이어 메인)
+    static let cadenzaTrackTitle = Font.system(size: 26, weight: .heavy)
+
+    /// 본문 (16pt)
+    static let cadenzaBody = Font.system(size: 16, weight: .regular)
 
     /// 보조 정보 (13pt)
     static let cadenzaCaption = Font.system(size: 13, weight: .regular)
 
-    /// 숫자 정렬용 모노 (17pt)
+    /// 모노 상태값 (13pt) — BPM·재생률·ON/OFF 등 상태 숫자
+    /// IBM Plex Mono 번들 후 `Font.custom("IBMPlexMono-Medium", size: 13)`로 교체 예정
+    static let cadenzaMonoValue = Font.system(size: 13, weight: .medium, design: .monospaced)
+
+    /// 모노 타임코드 (12pt)
+    static let cadenzaMonoTimecode = Font.system(size: 12, weight: .regular, design: .monospaced)
+
+    /// 모노 라벨 (10pt) — TGT/KLK/SPM 등 작은 라벨
+    static let cadenzaMonoLabel = Font.system(size: 10, weight: .regular, design: .monospaced)
+
+    /// 모노 배지 (11pt) — BPM pill 등
+    static let cadenzaMonoPill = Font.system(size: 11, weight: .medium, design: .monospaced)
+
+    /// 숫자 정렬용 모노 (17pt) — 레거시, BPMDisplayView 안 등에서 사용
     static let cadenzaNumeric = Font.system(size: 17, weight: .regular, design: .monospaced)
 }

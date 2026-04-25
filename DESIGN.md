@@ -374,20 +374,29 @@ ASCII 영역 분할 기반. 픽셀 단위가 아니라 **상대 비중과 배치
 
 > 액센트 컬러는 시안 라임으로 시작하되, 실사용 후 마음에 안 들면 바꿈. 라이트 모드 대응은 v1.5+
 
-### 4.3 타이포그래피 (Br3-a)
+### 4.3 타이포그래피 (runner-first redesign 2026-04-23 반영)
 
-**SF Pro 시스템 폰트만 사용**
+**SF Pro + IBM Plex Mono 조합**
 
 | 역할 | 폰트 | 크기 | 용도 |
 |---|---|---|---|
-| Display | SF Pro Rounded Bold | 96pt | BPM 큰 숫자 (175) |
-| Title 1 | SF Pro Display Bold | 34pt | 화면 제목 |
-| Title 2 | SF Pro Display Semibold | 22pt | 섹션 제목 |
-| Body | SF Pro Text Regular | 17pt | 본문 |
-| Caption | SF Pro Text Regular | 13pt | 보조 정보, 라벨 |
-| Numeric | SF Pro Mono Regular | 17pt | BPM 비율, 숫자 정렬 |
+| BPM Display | SF Pro Rounded Bold | 56pt | 메인 플레이어 BPM 숫자 (이전 96pt에서 축소) |
+| Track Title | SF Pro Display Heavy | 26pt | 플레이어 곡 제목 |
+| Title 1 | SF Pro Display Bold | 28pt | 화면 제목 |
+| Title 2 | SF Pro Display Semibold | 20pt | 섹션 제목 |
+| Body | SF Pro Text Regular | 16pt | 본문, 아티스트명 |
+| Caption | SF Pro Text Regular | 13pt | 보조 정보 |
+| Mono Value | IBM Plex Mono Medium | 13pt | 상태 숫자 (BPM, ×1.00, ON/OFF) |
+| Mono Timecode | IBM Plex Mono Regular | 12pt | 진행 시간 (1:52 / 3:04) |
+| Mono Label | IBM Plex Mono Regular | 10pt, tracking 2px | 라벨 (TGT, KLK, SPM) |
+| Mono Pill | IBM Plex Mono Medium | 11pt, tracking 1.5px | BPM pill 배지 (175 SPM) |
 
-**핵심**: BPM 표시는 `SF Pro Rounded`로 숫자가 둥글고 시원해 보이게. 일반 텍스트는 표준 SF Pro.
+**핵심:**
+- **BPM은 더 이상 96pt 주인공이 아니다** — 러너 사용 맥락에서 BPM은 한 번 설정하고 마는 상태값. 곡 제목·아트워크가 주인공.
+- **모노스페이스는 상태 표현에만** — IBM Plex Mono는 숫자/상태값(BPM, 재생률, ON/OFF, 타임코드)에만. 장식 라벨에는 사용 안 함.
+- IBM Plex Mono는 SIL OFL 라이선스 (상용 OK), Regular + Medium 두 웨이트만 번들 (~200KB).
+
+**구현 노트**: IBM Plex Mono 번들 전까지는 시스템 monospaced (`Font.system(.., design: .monospaced)`)로 폴백.
 
 ### 4.4 앱 아이콘 컨셉 (Br1-c, 추상)
 
