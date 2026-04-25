@@ -180,6 +180,8 @@ final class AudioManager: ObservableObject {
     /// 트랙 수명 동안 권한을 유지하고, 새 파일 로드 또는 해제 시 반납한다.
     private var currentAccessedURL: URL?
     private var currentTrackURL: URL?
+    private var currentTrackOverrideKey: String?
+    private let bpmOverrideStore: TrackBPMOverrideStore
     private var isAudioSessionConfigured = false
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
@@ -190,7 +192,8 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Init
 
-    init() {
+    init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
+        self.bpmOverrideStore = bpmOverrideStore
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
@@ -358,6 +361,7 @@ final class AudioManager: ObservableObject {
         // 이전 파일의 security-scoped 권한 반납
         releaseCurrentURL()
         currentTrackURL = nil
+        currentTrackOverrideKey = nil
 
         state = .loading
         errorMessage = nil
@@ -405,6 +409,17 @@ final class AudioManager: ObservableObject {
                 trackTitle = url.deletingPathExtension().lastPathComponent
             }
 
+            // 곡 영구 BPM override를 위한 identity 키
+            let overrideKey = TrackBPMOverrideStore.identityKey(
+                .fileMetadata(
+                    title: trackTitle,
+                    artist: trackArtist,
+                    lastPathComponent: url.lastPathComponent
+                )
+            )
+            currentTrackOverrideKey = overrideKey
+            let storedOverride = bpmOverrideStore.bpm(forIdentity: overrideKey)
+
             // BPM 메타데이터 읽기
             let metadataBPM = await BPMMetadataReader.readBPM(from: url)
             if let bpm = metadataBPM {
@@ -443,6 +458,20 @@ final class AudioManager: ObservableObject {
                     logger.info("[track_loaded] BPM from audio analysis: \(analysis.estimatedBPM)")
                 }
                 logger.info("[track_loaded] Beat offset from analysis: \(analysis.beatOffsetSeconds)s beatCount=\(analysis.beatTimesSeconds?.count ?? 0) confidence=\(analysis.confidence) cache=\(self.beatAlignmentCacheStatus.rawValue)")
+            }
+
+            // 사용자 override는 모든 자동 결정보다 우선
+            if let storedOverride,
+               storedOverride >= BPMRange.originalMin,
+               storedOverride <= BPMRange.originalMax {
+                originalBPM = storedOverride
+                _bpmFromMetadata = false
+                originalBPMSource = .manual
+                beatSyncStatus = .bpmOnly
+                beatSyncIssue = .missingBeatGrid
+                sourceBeatOffsetSeconds = 0
+                sourceBeatTimesSeconds = []
+                logger.info("[track_loaded] Applied user BPM override: \(storedOverride)")
             }
 
             applyAutomaticTargetBPM()
@@ -685,6 +714,24 @@ final class AudioManager: ObservableObject {
         sourceBeatOffsetSeconds = 0
         sourceBeatTimesSeconds = []
         errorMessage = nil
+        if let key = currentTrackOverrideKey {
+            bpmOverrideStore.store(bpm: bpm, forIdentity: key)
+        }
+        applyAutomaticTargetBPM()
+    }
+
+    /// half/double-time 후보 중 목표 케이던스에 가까운 BPM을 임시로 적용한다.
+    /// 사용자가 명시적으로 선택한 것이 아니므로 영구 저장하지 않고
+    /// `originalBPMSource`도 바꾸지 않아 UI에 후보 버튼이 계속 보인다.
+    func applyAutoBPMDefault(_ bpm: Double) {
+        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
+        guard originalBPMSource != .manual else { return }
+        guard abs(originalBPM - bpm) > 0.5 else {
+            applyAutomaticTargetBPM()
+            return
+        }
+        originalBPM = bpm
+        _bpmFromMetadata = false
         applyAutomaticTargetBPM()
     }
 

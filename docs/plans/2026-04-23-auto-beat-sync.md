@@ -70,14 +70,29 @@
 ### Task 4: Add simple BPM confirmation for octave mistakes
 
 **Files:**
-- Modify: `Cadenza/Views/PlayerView.swift`
+- Add: `Cadenza/Services/TrackBPMOverrideStore.swift`
+- Modify: `Cadenza/Models/AudioManager.swift`
 - Modify: `Cadenza/Services/AppleMusicStreamingController.swift`
+- Modify: `Cadenza/Utilities/PlaybackModels.swift`
+- Modify: `Cadenza/Views/PlayerView.swift`
+- Add: `Tests/TrackBPMOverrideStoreTests.swift`
+- Modify: `Tests/PlaybackModelsTests.swift`
 
 **Steps:**
-- Detect likely half/double-time ambiguity from analysis/external BPM candidates.
-- Show only large BPM choices, such as `87` and `174`, instead of ms timing controls.
-- Persist the selected BPM through the existing manual BPM path so the user's choice remains authoritative.
+- Add a per-track BPM override store backed by `UserDefaults` keyed by stable track identity (Apple Music `songID`, local file `persistentID`/asset key). The store records the user's chosen BPM and is the highest-priority source — it overrides analysis, metadata, preset, and external BPM lookups.
+- On track load (both local and streaming paths), look up the override before running analysis/external lookup. If found, apply it as `originalBPMSource = .manual` and skip half/double normalization.
+- Detect likely half/double-time ambiguity from analysis/external BPM candidates and surface a `needsConfirmation` status with both candidates (e.g. `87` and `174`).
+- Replace ms timing controls with two BPM choice buttons in `PlayerView` for the `needsConfirmation` status. Tapping a button persists it through `TrackBPMOverrideStore` and the existing manual BPM path.
+- Auto-default rule: when the user does not pick (running scenario), pick the candidate closer to `audio.targetBPM`. Apply this default automatically on track load so playback never stalls waiting for input. Show a small "자동 선택됨 (목표에 가까움)" hint until the user confirms or changes it; once confirmed, store as manual override.
+- Manual numeric BPM input in `PlayerView` must also write to `TrackBPMOverrideStore` so it persists across sessions.
 - Do not normalize user-selected BPM through external double-time normalization.
+
+## Persistence Contract
+
+- Override store key: `"trackBPMOverride.v1.<identity>"` where `<identity>` is `am-<songID>` for Apple Music tracks and `local-<persistentID>` for library files; metadata-hashed key (`title|artist|album`) is used as a fallback when neither identifier is available.
+- Stored value is `Double` BPM only. The store does not persist any beat grid, offset, or analysis confidence — only the user's authoritative tempo.
+- Reads happen synchronously on the main actor when a track is bound; writes happen whenever `setOriginalBPM` is called from manual entry, BPM choice tap, or auto-default acceptance.
+- `assumedDefault` placeholder values must never be written back to the store.
 
 ## Test Plan
 

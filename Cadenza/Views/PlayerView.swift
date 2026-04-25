@@ -71,6 +71,13 @@ struct PlayerView: View {
                             originalBPMControls
                                 .padding(.horizontal, 20)
 
+                            if let pair = ambiguousBPMOctaveChoicePair {
+                                Divider().background(Color.cadenzaDivider)
+
+                                bpmChoiceSection(pair: pair)
+                                    .padding(.horizontal, 20)
+                            }
+
                             Divider().background(Color.cadenzaDivider)
 
                             beatSyncStatusSection
@@ -168,6 +175,12 @@ struct PlayerView: View {
         }
         .onChange(of: streaming.currentBeatSyncStatus) { _, _ in
             applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: audio.originalBPM) { _, _ in
+            applyAutoBPMDefaultIfNeeded()
+        }
+        .onChange(of: audio.originalBPMSource) { _, _ in
+            applyAutoBPMDefaultIfNeeded()
         }
         .onReceive(audio.trackEndedSubject) { _ in
             handleLocalPlaylistTrackEnded()
@@ -485,6 +498,89 @@ struct PlayerView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("재생 진행")
         .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(nowPlaying.playbackDuration))")
+    }
+
+    private var ambiguousBPMOctaveChoicePair: BPMOctaveChoicePair? {
+        guard nowPlaying.originalBPMSource != .manual else { return nil }
+        return BPMOctaveChoice.ambiguousPair(for: nowPlaying.originalBPM)
+    }
+
+    private func bpmChoiceSection(pair: BPMOctaveChoicePair) -> some View {
+        let goal = audio.targetBPM
+        let defaultChoice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: goal)
+        let activeBPM = nowPlaying.originalBPM.rounded()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("BPM 확인")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+                Spacer()
+                Text("자동 선택됨")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextTertiary)
+            }
+
+            HStack(spacing: 10) {
+                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM, defaultBPM: defaultChoice)
+                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM, defaultBPM: defaultChoice)
+            }
+
+            Text("목표 \(Int(goal.rounded())) BPM에 가까운 \(Int(defaultChoice)) BPM을 적용했습니다. 다른 값을 누르면 변경됩니다.")
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextSecondary)
+        }
+    }
+
+    private func bpmChoiceButton(bpm: Double, activeBPM: Double, defaultBPM: Double) -> some View {
+        let isActive = abs(activeBPM - bpm) < 0.5
+        let label = "\(Int(bpm)) BPM"
+        return Button {
+            confirmBPMChoice(bpm)
+        } label: {
+            VStack(spacing: 4) {
+                Text(label)
+                    .font(.cadenzaBody)
+                if abs(bpm - defaultBPM) < 0.5 {
+                    Text("목표에 가까움")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
+            .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityLabel("\(label) 적용")
+    }
+
+    private func confirmBPMChoice(_ bpm: Double) {
+        if streaming.hasSong {
+            _ = streaming.setManualBPM(bpm)
+            audio.setStreamingBeatAlignment(
+                bpm: bpm,
+                source: .manual,
+                beatOffsetSeconds: nil
+            )
+        } else {
+            audio.setOriginalBPM(bpm)
+        }
+        originalBPMText = "\(Int(bpm))"
+    }
+
+    private func applyAutoBPMDefaultIfNeeded() {
+        guard let pair = ambiguousBPMOctaveChoicePair else { return }
+        let choice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: audio.targetBPM)
+        if streaming.hasSong {
+            // Streaming controller already published a BPM; only adjust if it's the
+            // wrong octave. Avoid touching streaming's source-of-truth except via
+            // the audio manager's lighter auto-default path.
+            audio.applyAutoBPMDefault(choice)
+        } else {
+            audio.applyAutoBPMDefault(choice)
+        }
     }
 
     private var beatSyncStatusSection: some View {

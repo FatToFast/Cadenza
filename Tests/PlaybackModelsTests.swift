@@ -431,4 +431,38 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.status, .unsuitable)
         XCTAssertEqual(fit.badgeText, "러닝 부적합")
     }
+
+    // MARK: - BPMOctaveChoice
+
+    func testBPMOctavePairFromHighBPM() {
+        let pair = BPMOctaveChoice.ambiguousPair(for: 174)
+        XCTAssertEqual(pair, BPMOctaveChoicePair(lower: 87, upper: 174))
+    }
+
+    func testBPMOctavePairFromLowBPM() {
+        let pair = BPMOctaveChoice.ambiguousPair(for: 87)
+        XCTAssertEqual(pair, BPMOctaveChoicePair(lower: 87, upper: 174))
+    }
+
+    func testBPMOctavePairNilInMidRange() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 120))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 130))
+    }
+
+    func testBPMOctavePairRejectsOutOfBounds() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 50))
+    }
+
+    func testBPMOctaveDefaultPicksClosestToGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 175), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 90), 87)
+    }
+
+    func testBPMOctaveDefaultPrefersUpperOnTieOrMissingGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: nil), 174)
+        let mid = (87.0 + 174.0) / 2
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: mid), 174)
+    }
 }

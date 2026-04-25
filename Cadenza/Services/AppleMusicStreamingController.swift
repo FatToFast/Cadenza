@@ -119,6 +119,11 @@ final class AppleMusicStreamingController: ObservableObject {
     private var didBuildBPMCache = false
     private var desiredPlaybackRate: Float = 1.0
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
+    private let bpmOverrideStore: TrackBPMOverrideStore
+
+    init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
+        self.bpmOverrideStore = bpmOverrideStore
+    }
 
     var hasSong: Bool {
         currentTitle != nil
@@ -421,6 +426,9 @@ final class AppleMusicStreamingController: ObservableObject {
             artist: identity.artist,
             albumTitle: identity.albumTitle
         )
+        for key in overrideStoreKeys(for: identity) {
+            bpmOverrideStore.store(bpm: bpm, forIdentity: key)
+        }
         applyResolvedBPM(result)
         errorMessage = nil
 
@@ -624,6 +632,18 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     private func applyResolvedBPM(_ result: StreamingBPMResult?) {
+        // 사용자가 이 곡에 대해 직접 저장한 BPM이 있으면 모든 자동 결정보다 우선.
+        if let overrideBPM = currentTrackOverrideBPM() {
+            currentBPMSource = .manual
+            currentBPM = overrideBPM
+            currentBeatOffsetSeconds = nil
+            currentBeatTimesSeconds = []
+            currentBeatAlignmentConfidence = nil
+            currentBeatSyncStatus = .bpmOnly
+            currentBeatSyncIssue = .missingBeatGrid
+            return
+        }
+
         currentBPMSource = result?.source
         currentBPM = result?.bpm
         currentBeatOffsetSeconds = result?.beatOffsetSeconds
@@ -631,6 +651,53 @@ final class AppleMusicStreamingController: ObservableObject {
         currentBeatAlignmentConfidence = result?.confidence
         currentBeatSyncStatus = result?.beatSyncStatus ?? .needsConfirmation
         currentBeatSyncIssue = result?.beatSyncIssue ?? .missingBPM
+    }
+
+    private func currentTrackOverrideBPM() -> Double? {
+        guard let identity = currentBPMIdentity() else { return nil }
+        return overrideBPM(for: identity)
+    }
+
+    private func overrideBPM(
+        for identity: (
+            songID: String?,
+            isrc: String?,
+            title: String,
+            artist: String?,
+            albumTitle: String?
+        )
+    ) -> Double? {
+        for key in overrideStoreKeys(for: identity) {
+            if let bpm = bpmOverrideStore.bpm(forIdentity: key) {
+                return bpm
+            }
+        }
+        return nil
+    }
+
+    private func overrideStoreKeys(
+        for identity: (
+            songID: String?,
+            isrc: String?,
+            title: String,
+            artist: String?,
+            albumTitle: String?
+        )
+    ) -> [String] {
+        var keys: [String] = []
+        if let songID = identity.songID, !songID.isEmpty {
+            keys.append(TrackBPMOverrideStore.identityKey(.appleMusic(songID: songID)))
+        }
+        keys.append(
+            TrackBPMOverrideStore.identityKey(
+                .fileMetadata(
+                    title: identity.title,
+                    artist: identity.artist,
+                    lastPathComponent: identity.albumTitle ?? ""
+                )
+            )
+        )
+        return keys
     }
 
     private func startPreviewBPMAnalysisIfNeeded(for song: Song) {

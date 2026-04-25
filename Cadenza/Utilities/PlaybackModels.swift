@@ -66,6 +66,56 @@ enum ExternalBPMOctaveNormalizer {
     }
 }
 
+struct BPMOctaveChoicePair: Sendable, Equatable {
+    let lower: Double
+    let upper: Double
+}
+
+enum BPMOctaveChoice {
+    /// Return half/double-time pair when a BPM looks ambiguous between
+    /// two octaves (e.g. 87 and 174). Returns nil when the BPM is in a
+    /// range with no plausible alternate octave.
+    static func ambiguousPair(for bpm: Double) -> BPMOctaveChoicePair? {
+        guard bpm.isFinite, bpm > 0 else { return nil }
+
+        let lower: Double
+        let upper: Double
+        if bpm >= 140 {
+            lower = (bpm / 2).rounded()
+            upper = bpm.rounded()
+        } else if bpm <= 100 {
+            lower = bpm.rounded()
+            upper = (bpm * 2).rounded()
+        } else {
+            return nil
+        }
+
+        guard lower >= 60, upper <= 220, upper > lower else { return nil }
+        return BPMOctaveChoicePair(lower: lower, upper: upper)
+    }
+
+    /// Pick the candidate closer to the user's goal cadence. On a tie or
+    /// when the goal is unset, prefer the upper candidate because most
+    /// running cadences live above 140 spm.
+    static func defaultChoice(
+        for pair: BPMOctaveChoicePair,
+        goalCadence: Double?
+    ) -> Double {
+        guard let goalCadence,
+              goalCadence.isFinite,
+              goalCadence > 0 else {
+            return pair.upper
+        }
+
+        let lowerDelta = abs(pair.lower - goalCadence)
+        let upperDelta = abs(pair.upper - goalCadence)
+        if abs(lowerDelta - upperDelta) < 0.5 {
+            return pair.upper
+        }
+        return lowerDelta < upperDelta ? pair.lower : pair.upper
+    }
+}
+
 enum PlaybackStateRecovery {
     static func stateAfterClearingError(
         currentState: PlaybackState,
