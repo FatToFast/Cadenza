@@ -11,6 +11,7 @@
 		1FC0B40538CED2135469F8F1 /* AppleMusicStreamingPlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */; };
 		26BFD0B1BA71B630A502CF5C /* MusicLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671D48A837690377CB1AAE6 /* MusicLibraryService.swift */; };
 		280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */; };
+		40C9A88853309FD5265C457C /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = EC36716D139A696BBB4F92D0 /* IBMPlexMono-Medium.ttf */; };
 		425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */; };
 		4BD0252B1F10762A1441CAC2 /* GetSongBPMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59867C79735DFF097C22F1FC /* GetSongBPMService.swift */; };
 		4EEB15DADAF93884AA1B8A06 /* GetSongBPMServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FFA445142AF0773E16E05F /* GetSongBPMServiceTests.swift */; };
@@ -20,6 +21,7 @@
 		78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */; };
 		799739F1F33E39D022002646 /* AppleMusicLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FAA9392A307FEA406DB5B74 /* AppleMusicLibraryView.swift */; };
 		7AAC3F44673E680ECA0C6C6C /* AssetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BAF3FB994C0A6FFC4979F4A /* AssetResolver.swift */; };
+		7C33BA9D5E86498CCA508EF4 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0F3F2132CB8CE16108858F99 /* IBMPlexMono-Regular.ttf */; };
 		7CCD087ADED37595EFD55A1F /* BPMDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */; };
 		86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */; };
 		86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F8FFC774733449AD9A28B63 /* Constants.swift */; };
@@ -54,6 +56,7 @@
 /* Begin PBXFileReference section */
 		08725DAEB50A2BE3179BD41E /* StreamingBPMResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingBPMResolverTests.swift; sourceTree = "<group>"; };
 		0BAF3FB994C0A6FFC4979F4A /* AssetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetResolver.swift; sourceTree = "<group>"; };
+		0F3F2132CB8CE16108858F99 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
 		2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingPlaylistView.swift; sourceTree = "<group>"; };
 		3F8FFC774733449AD9A28B63 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		405DAF8C88AED8E05BDCD05F /* TrackBPMOverrideStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackBPMOverrideStore.swift; sourceTree = "<group>"; };
@@ -66,6 +69,7 @@
 		602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenzaApp.swift; sourceTree = "<group>"; };
 		680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModelsTests.swift; sourceTree = "<group>"; };
 		684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMMetadataReader.swift; sourceTree = "<group>"; };
+		6C1EBC0472460C4AB86F120D /* Cadenza.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cadenza.xcconfig; sourceTree = "<group>"; };
 		6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensatorTests.swift; sourceTree = "<group>"; };
 		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
 		7BF697DFE37A6CBC6011408E /* AppleMusicStreamingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingController.swift; sourceTree = "<group>"; };
@@ -81,25 +85,16 @@
 		B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeatAlignmentAnalyzer.swift; sourceTree = "<group>"; };
 		B93EE30A19AD3E40B7C02757 /* LatencyCompensator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensator.swift; sourceTree = "<group>"; };
 		C8162D5FCED9335BA2D295D7 /* AudioManagerGenerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManagerGenerationTests.swift; sourceTree = "<group>"; };
-		D05A84493369E63DA3576C5B /* Cadenza.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cadenza.xcconfig; sourceTree = "<group>"; };
 		D0FFA445142AF0773E16E05F /* GetSongBPMServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetSongBPMServiceTests.swift; sourceTree = "<group>"; };
 		D32E8307CA39DD324E6A03F0 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		DDFBE399676A3E84FCF154B9 /* Cadenza.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cadenza.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC36716D139A696BBB4F92D0 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
 		F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = "Kickdrum Rocket-2.mp3"; sourceTree = "<group>"; };
 		F671D48A837690377CB1AAE6 /* MusicLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibraryService.swift; sourceTree = "<group>"; };
 		FCCBFC7FE45602B89F9444C0 /* AppleMusicTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicTrack.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
-		0E8B5F59EFD81A8147FD15B2 /* Cadenza */ = {
-			isa = PBXGroup;
-			children = (
-				D05A84493369E63DA3576C5B /* Cadenza.xcconfig */,
-			);
-			name = Cadenza;
-			path = .;
-			sourceTree = "<group>";
-		};
 		4294F18A6F32FD33C03D2F11 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -119,6 +114,15 @@
 				9F48386185F7E37392C33B0A /* CadenzaTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		52118BEE2AFDB64AC55B8801 /* Cadenza-redesign */ = {
+			isa = PBXGroup;
+			children = (
+				6C1EBC0472460C4AB86F120D /* Cadenza.xcconfig */,
+			);
+			name = "Cadenza-redesign";
+			path = .;
 			sourceTree = "<group>";
 		};
 		6CC5079B706643F82BA37E7B /* Cadenza */ = {
@@ -151,7 +155,7 @@
 			isa = PBXGroup;
 			children = (
 				6CC5079B706643F82BA37E7B /* Cadenza */,
-				0E8B5F59EFD81A8147FD15B2 /* Cadenza */,
+				52118BEE2AFDB64AC55B8801 /* Cadenza-redesign */,
 				97DB336B24E445CCA8E89B06 /* Tests */,
 				47BD6E1E8D941720FAF815FC /* Products */,
 			);
@@ -161,6 +165,7 @@
 			isa = PBXGroup;
 			children = (
 				F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */,
+				E3D4C5CAD6897945BBB7C69D /* Fonts */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -203,6 +208,15 @@
 				7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */,
 			);
 			path = Utilities;
+			sourceTree = "<group>";
+		};
+		E3D4C5CAD6897945BBB7C69D /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				EC36716D139A696BBB4F92D0 /* IBMPlexMono-Medium.ttf */,
+				0F3F2132CB8CE16108858F99 /* IBMPlexMono-Regular.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 		FF6634F7FE4E287249122CC8 /* Components */ = {
@@ -292,6 +306,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40C9A88853309FD5265C457C /* IBMPlexMono-Medium.ttf in Resources */,
+				7C33BA9D5E86498CCA508EF4 /* IBMPlexMono-Regular.ttf in Resources */,
 				B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -393,7 +409,7 @@
 		};
 		64ED35CA32E459B9E54E3D84 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D05A84493369E63DA3576C5B /* Cadenza.xcconfig */;
+			baseConfigurationReference = 6C1EBC0472460C4AB86F120D /* Cadenza.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -416,7 +432,7 @@
 		};
 		6BCDE8368B2F79D16927E890 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D05A84493369E63DA3576C5B /* Cadenza.xcconfig */;
+			baseConfigurationReference = 6C1EBC0472460C4AB86F120D /* Cadenza.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";

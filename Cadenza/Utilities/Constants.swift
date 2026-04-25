@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - BPM Ranges
 
@@ -54,6 +55,25 @@ extension Color {
 
 // MARK: - Typography (DESIGN.md 4.3, runner-first redesign 2026-04-23)
 
+private enum CadenzaFontName {
+    static let monoRegular = "IBMPlexMono-Regular"
+    static let monoMedium = "IBMPlexMono-Medium"
+}
+
+private extension Font {
+    /// IBM Plex Mono if registered, else system monospaced fallback.
+    static func cadenzaMono(size: CGFloat, weight: Font.Weight) -> Font {
+        let name = weight == .medium || weight == .semibold || weight == .bold
+            ? CadenzaFontName.monoMedium
+            : CadenzaFontName.monoRegular
+
+        if UIFont(name: name, size: size) != nil {
+            return Font.custom(name, size: size)
+        }
+        return Font.system(size: size, weight: weight, design: .monospaced)
+    }
+}
+
 extension Font {
     /// BPM 디스플레이 (56pt, runner-first에서 96pt → 56pt로 축소)
     static let bpmDisplay = Font.system(size: 56, weight: .bold, design: .rounded)
@@ -74,18 +94,17 @@ extension Font {
     static let cadenzaCaption = Font.system(size: 13, weight: .regular)
 
     /// 모노 상태값 (13pt) — BPM·재생률·ON/OFF 등 상태 숫자
-    /// IBM Plex Mono 번들 후 `Font.custom("IBMPlexMono-Medium", size: 13)`로 교체 예정
-    static let cadenzaMonoValue = Font.system(size: 13, weight: .medium, design: .monospaced)
+    static let cadenzaMonoValue = Font.cadenzaMono(size: 13, weight: .medium)
 
     /// 모노 타임코드 (12pt)
-    static let cadenzaMonoTimecode = Font.system(size: 12, weight: .regular, design: .monospaced)
+    static let cadenzaMonoTimecode = Font.cadenzaMono(size: 12, weight: .regular)
 
     /// 모노 라벨 (10pt) — TGT/KLK/SPM 등 작은 라벨
-    static let cadenzaMonoLabel = Font.system(size: 10, weight: .regular, design: .monospaced)
+    static let cadenzaMonoLabel = Font.cadenzaMono(size: 10, weight: .regular)
 
     /// 모노 배지 (11pt) — BPM pill 등
-    static let cadenzaMonoPill = Font.system(size: 11, weight: .medium, design: .monospaced)
+    static let cadenzaMonoPill = Font.cadenzaMono(size: 11, weight: .medium)
 
     /// 숫자 정렬용 모노 (17pt) — 레거시, BPMDisplayView 안 등에서 사용
-    static let cadenzaNumeric = Font.system(size: 17, weight: .regular, design: .monospaced)
+    static let cadenzaNumeric = Font.cadenzaMono(size: 17, weight: .regular)
 }
