@@ -44,7 +44,8 @@ struct PlayerView: View {
                             targetBPM: audio.targetBPM,
                             originalBPM: nowPlaying.originalBPM,
                             playbackRate: audio.playbackRate,
-                            originalBPMSource: nowPlaying.originalBPMSource
+                            originalBPMSource: nowPlaying.originalBPMSource,
+                            cadenceFit: currentCadenceFit
                         )
                         .padding(.vertical, 16)
 
@@ -503,6 +504,32 @@ struct PlayerView: View {
     private var ambiguousBPMOctaveChoicePair: BPMOctaveChoicePair? {
         guard nowPlaying.originalBPMSource != .manual else { return nil }
         return BPMOctaveChoice.ambiguousPair(for: nowPlaying.originalBPM)
+    }
+
+    private var currentCadenceFit: RunningCadenceFit? {
+        guard audio.hasLoadedTrack || streaming.hasSong else { return nil }
+        guard nowPlaying.originalBPMSource != .assumedDefault else { return nil }
+
+        let previewSignal: RunningPreviewSignal?
+        if streaming.hasSong {
+            previewSignal = RunningPreviewSignal(
+                confidence: streaming.currentBeatAlignmentConfidence,
+                beatTimesSeconds: streaming.currentBeatTimesSeconds
+            )
+        } else if let confidence = audio.beatAlignmentConfidence {
+            previewSignal = RunningPreviewSignal(
+                confidence: confidence,
+                beatTimesSeconds: []
+            )
+        } else {
+            previewSignal = nil
+        }
+
+        return RunningCadenceFit.evaluate(
+            originalBPM: nowPlaying.originalBPM,
+            targetCadence: audio.targetBPM,
+            previewSignal: previewSignal
+        )
     }
 
     private func bpmChoiceSection(pair: BPMOctaveChoicePair) -> some View {
