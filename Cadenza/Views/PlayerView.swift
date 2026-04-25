@@ -247,10 +247,10 @@ struct PlayerView: View {
             }
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
-            // 곡 로드됨
-            VStack(spacing: 8) {
+            // 곡 로드됨 — 곡 정보가 주인공 (runner-first redesign)
+            VStack(spacing: 6) {
                 Text(title)
-                    .font(.cadenzaTitle2)
+                    .font(.cadenzaTrackTitle)
                     .foregroundColor(.cadenzaTextPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -497,11 +497,11 @@ struct PlayerView: View {
 
             HStack {
                 Text(formattedTime(displayedPlaybackTime))
-                    .font(.cadenzaCaption)
+                    .font(.cadenzaMonoTimecode)
                     .foregroundColor(.cadenzaTextSecondary)
                 Spacer()
                 Text(formattedTime(nowPlaying.playbackDuration))
-                    .font(.cadenzaCaption)
+                    .font(.cadenzaMonoTimecode)
                     .foregroundColor(.cadenzaTextTertiary)
             }
         }
