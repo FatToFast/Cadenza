@@ -87,6 +87,7 @@ final class AudioManager: ObservableObject {
     @Published private(set) var originalBPMSource: OriginalBPMSource = .assumedDefault
     @Published private(set) var trackTitle: String?
     @Published private(set) var trackArtist: String?
+    @Published private(set) var currentArtworkData: Data?
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentPlaybackTime: TimeInterval = 0
     @Published private(set) var trackDuration: TimeInterval = 0
@@ -373,6 +374,7 @@ final class AudioManager: ObservableObject {
         trackDuration = 0
         trackTitle = nil
         trackArtist = nil
+        currentArtworkData = nil
         beatAlignmentConfidence = nil
         beatAlignmentCacheStatus = .none
         beatSyncStatus = .needsConfirmation
@@ -408,6 +410,11 @@ final class AudioManager: ObservableObject {
             } else {
                 trackTitle = url.deletingPathExtension().lastPathComponent
             }
+
+            // 아트워크 로딩 (Now Playing Info Center 공급용)
+            let artworkData = await Self.loadArtworkData(from: asset)
+            guard generation == trackGeneration else { return }
+            currentArtworkData = artworkData
 
             // 곡 영구 BPM override를 위한 identity 키
             let overrideKey = TrackBPMOverrideStore.identityKey(
@@ -1349,6 +1356,20 @@ final class AudioManager: ObservableObject {
             return nil
         }
         return value
+    }
+
+    private static func loadArtworkData(from asset: AVAsset) async -> Data? {
+        do {
+            let metadata = try await asset.load(.commonMetadata)
+            for item in metadata where item.commonKey == .commonKeyArtwork {
+                if let data = try await item.load(.dataValue) {
+                    return data
+                }
+            }
+        } catch {
+            // 아트워크 로딩 실패는 치명적이지 않음 — 조용히 무시
+        }
+        return nil
     }
 }
 

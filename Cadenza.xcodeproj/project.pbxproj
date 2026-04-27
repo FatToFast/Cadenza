@@ -11,6 +11,7 @@
 		1FC0B40538CED2135469F8F1 /* AppleMusicStreamingPlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */; };
 		26BFD0B1BA71B630A502CF5C /* MusicLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671D48A837690377CB1AAE6 /* MusicLibraryService.swift */; };
 		280672925F91AF86472020BF /* PlaybackModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */; };
+		3D28167BB1F62CCCB6C6C6A3 /* RemoteCommandCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B7600CCC72F81052FC2A33 /* RemoteCommandCoordinator.swift */; };
 		40C9A88853309FD5265C457C /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = EC36716D139A696BBB4F92D0 /* IBMPlexMono-Medium.ttf */; };
 		425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */; };
 		4BD0252B1F10762A1441CAC2 /* GetSongBPMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59867C79735DFF097C22F1FC /* GetSongBPMService.swift */; };
@@ -28,6 +29,7 @@
 		95C9A410EC6065DDC52548D0 /* StreamingBPMResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08725DAEB50A2BE3179BD41E /* StreamingBPMResolverTests.swift */; };
 		9671FC8640EF94F79471A100 /* AppleMusicStreamingSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F95249D0AD96D91DF31B11 /* AppleMusicStreamingSearchView.swift */; };
 		A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */; };
+		A46485893ADA1E6BB12D8DE7 /* NowPlayingCenterCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A7C6FAA128A540DDBE45F6F /* NowPlayingCenterCoordinator.swift */; };
 		AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */; };
 		AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498EA72F6CA1930D69CB9A0B /* PlayerView.swift */; };
 		AF592E8D64596D612783ABBD /* NowPlayingInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B066DF4A31066DC1B6AD6C18 /* NowPlayingInfo.swift */; };
@@ -69,6 +71,7 @@
 		602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenzaApp.swift; sourceTree = "<group>"; };
 		680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModelsTests.swift; sourceTree = "<group>"; };
 		684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMMetadataReader.swift; sourceTree = "<group>"; };
+		6A7C6FAA128A540DDBE45F6F /* NowPlayingCenterCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingCenterCoordinator.swift; sourceTree = "<group>"; };
 		6C1EBC0472460C4AB86F120D /* Cadenza.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cadenza.xcconfig; sourceTree = "<group>"; };
 		6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensatorTests.swift; sourceTree = "<group>"; };
 		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
@@ -79,6 +82,7 @@
 		92F95249D0AD96D91DF31B11 /* AppleMusicStreamingSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingSearchView.swift; sourceTree = "<group>"; };
 		997835964EA4195CD8E9EC1A /* NowPlayingInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingInfoTests.swift; sourceTree = "<group>"; };
 		9F48386185F7E37392C33B0A /* CadenzaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CadenzaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A8B7600CCC72F81052FC2A33 /* RemoteCommandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCommandCoordinator.swift; sourceTree = "<group>"; };
 		AB5B823C16B85063744991B7 /* PlaybackEndBehavior.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackEndBehavior.swift; sourceTree = "<group>"; };
 		AC55B62D7D30E7543446A624 /* QueueItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueItem.swift; sourceTree = "<group>"; };
 		B066DF4A31066DC1B6AD6C18 /* NowPlayingInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingInfo.swift; sourceTree = "<group>"; };
@@ -193,6 +197,8 @@
 				0BAF3FB994C0A6FFC4979F4A /* AssetResolver.swift */,
 				59867C79735DFF097C22F1FC /* GetSongBPMService.swift */,
 				F671D48A837690377CB1AAE6 /* MusicLibraryService.swift */,
+				6A7C6FAA128A540DDBE45F6F /* NowPlayingCenterCoordinator.swift */,
+				A8B7600CCC72F81052FC2A33 /* RemoteCommandCoordinator.swift */,
 				405DAF8C88AED8E05BDCD05F /* TrackBPMOverrideStore.swift */,
 			);
 			path = Services;
@@ -335,11 +341,13 @@
 				4BD0252B1F10762A1441CAC2 /* GetSongBPMService.swift in Sources */,
 				86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */,
 				26BFD0B1BA71B630A502CF5C /* MusicLibraryService.swift in Sources */,
+				A46485893ADA1E6BB12D8DE7 /* NowPlayingCenterCoordinator.swift in Sources */,
 				AF592E8D64596D612783ABBD /* NowPlayingInfo.swift in Sources */,
 				A1CEE6EDDFFACD3FF40F049B /* PlaybackEndBehavior.swift in Sources */,
 				AF5984DFCAB613D905AC84F4 /* PlaybackModels.swift in Sources */,
 				AB7996DD3509B5AD3E4B041B /* PlayerView.swift in Sources */,
 				DC62EA8D2AB4222F5B244C3B /* QueueItem.swift in Sources */,
+				3D28167BB1F62CCCB6C6C6A3 /* RemoteCommandCoordinator.swift in Sources */,
 				B8D91505AC789139D687B299 /* TrackBPMOverrideStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
