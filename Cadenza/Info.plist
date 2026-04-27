@@ -32,6 +32,12 @@
 	<string>$(SPOTIFY_CLIENT_SECRET)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>메트로놈에 맞춰 Apple Music 보관함 곡과 스트리밍 곡을 선택합니다.</string>
 	<key>UILaunchScreen</key>
@@ -39,6 +45,11 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UIAppFonts</key>
+	<array>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
 	</array>
 </dict>
 </plist>

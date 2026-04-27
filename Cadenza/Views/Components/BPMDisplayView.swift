@@ -17,8 +17,9 @@ struct BPMDisplayView: View {
                 .foregroundColor(.cadenzaAccent)
                 .contentTransition(.numericText())
 
-            Text("spm")
-                .font(.cadenzaCaption)
+            Text("SPM")
+                .font(.cadenzaMonoLabel)
+                .tracking(2)
                 .foregroundColor(.cadenzaTextSecondary)
 
             if let cadenceFit, cadenceFit.status != .unknown {
@@ -31,11 +32,12 @@ struct BPMDisplayView: View {
             // 원곡 BPM → 목표 BPM + 비율
             HStack(spacing: 8) {
                 Text("원곡 \(Int(originalBPM))")
-                    .font(.cadenzaNumeric)
+                    .font(.cadenzaMonoValue)
                     .foregroundColor(.cadenzaTextTertiary)
 
                 Text(originalBPMSource.badgeText)
-                    .font(.cadenzaCaption)
+                    .font(.cadenzaMonoPill)
+                    .tracking(1.2)
                     .foregroundColor(sourceColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -47,7 +49,7 @@ struct BPMDisplayView: View {
                     .foregroundColor(.cadenzaTextTertiary)
 
                 Text("\(Int(targetBPM))")
-                    .font(.cadenzaNumeric)
+                    .font(.cadenzaMonoValue)
                     .foregroundColor(.cadenzaTextSecondary)
             }
 
@@ -57,8 +59,8 @@ struct BPMDisplayView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
 
-            Text("재생속도 \(String(format: "%.2fx", playbackRate))")
-                .font(.cadenzaCaption)
+            Text("재생속도 ×\(String(format: "%.2f", playbackRate))")
+                .font(.cadenzaMonoValue)
                 .foregroundColor(.cadenzaTextTertiary)
         }
     }

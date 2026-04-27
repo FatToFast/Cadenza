@@ -87,6 +87,7 @@ final class AudioManager: ObservableObject {
     @Published private(set) var originalBPMSource: OriginalBPMSource = .assumedDefault
     @Published private(set) var trackTitle: String?
     @Published private(set) var trackArtist: String?
+    @Published private(set) var currentArtworkData: Data?
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentPlaybackTime: TimeInterval = 0
     @Published private(set) var trackDuration: TimeInterval = 0
@@ -189,6 +190,10 @@ final class AudioManager: ObservableObject {
     private var trackGeneration: Int = 0
     let trackEndedSubject = PassthroughSubject<Void, Never>()
     @Published var playbackEndBehavior: PlaybackEndBehavior = .loop
+    @Published private(set) var localPlaylist = LocalFilePlaylist()
+    @Published var localRepeatEnabled: Bool = false {
+        didSet { syncPlaybackEndBehavior() }
+    }
 
     // MARK: - Init
 
@@ -319,6 +324,88 @@ final class AudioManager: ObservableObject {
         await loadFile(url: url, generation: gen)
     }
 
+    // MARK: - Local Playlist
+
+    /// 로컬 파일 플레이리스트를 새로 만들고, 첫 곡을 로드한다 (autoPlay false 기본).
+    /// 빈 URL 배열이면 noop.
+    func loadPlaylist(fileURLs urls: [URL], autoPlay: Bool = false) async {
+        let sorted = urls.sorted {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
+        guard !sorted.isEmpty else { return }
+        var playlist = LocalFilePlaylist(fileURLs: sorted)
+        guard let item = playlist.currentItem, case .file(let url) = item.source else { return }
+        localPlaylist = playlist
+        syncPlaybackEndBehavior()
+        await loadFile(url: url)
+        if autoPlay, state == .ready { play() }
+    }
+
+    /// 외부에서 단일 곡 로드 시 (Apple Music 보관함 import 등) — 플레이리스트 비우기.
+    func clearLocalPlaylist() {
+        localPlaylist = LocalFilePlaylist()
+        syncPlaybackEndBehavior()
+    }
+
+    func nextLocalTrack() async {
+        let shouldAutoPlay = state == .playing
+        var playlist = localPlaylist
+        guard let item = playlist.moveToNext(), case .file(let url) = item.source else { return }
+        localPlaylist = playlist
+        syncPlaybackEndBehavior()
+        await loadFile(url: url)
+        if shouldAutoPlay, state == .ready { play() }
+    }
+
+    func previousLocalTrack() async {
+        let shouldAutoPlay = state == .playing
+        var playlist = localPlaylist
+        guard let item = playlist.moveToPrevious(), case .file(let url) = item.source else { return }
+        localPlaylist = playlist
+        syncPlaybackEndBehavior()
+        await loadFile(url: url)
+        if shouldAutoPlay, state == .ready { play() }
+    }
+
+    func toggleLocalShuffle() {
+        var playlist = localPlaylist
+        guard playlist.toggleShuffle() != nil else { return }
+        localPlaylist = playlist
+        syncPlaybackEndBehavior()
+    }
+
+    /// 곡 끝에 도달했을 때 자동 진행. trackEndedSubject 구독자가 호출한다.
+    func advanceAfterTrackEnded() async {
+        guard !localPlaylist.isEmpty else { return }
+        var playlist = localPlaylist
+
+        if let item = playlist.moveToNext(), case .file(let url) = item.source {
+            localPlaylist = playlist
+            syncPlaybackEndBehavior()
+            await loadFile(url: url)
+            if state == .ready { play() }
+            return
+        }
+
+        // 마지막 곡 — repeat 켜져 있으면 처음으로
+        if localRepeatEnabled, let item = playlist.moveToStart(), case .file(let url) = item.source {
+            localPlaylist = playlist
+            syncPlaybackEndBehavior()
+            await loadFile(url: url)
+            if state == .ready { play() }
+        }
+    }
+
+    private func syncPlaybackEndBehavior() {
+        // 단일 트랙 + repeat ON이면 loop, 그 외(플레이리스트 또는 repeat OFF)는 notify로
+        // → trackEndedSubject 구독자가 다음 곡으로 이어갈지 멈출지 결정.
+        if localPlaylist.isEmpty {
+            playbackEndBehavior = localRepeatEnabled ? .loop : .notify
+        } else {
+            playbackEndBehavior = .notify
+        }
+    }
+
     func loadResolvedTrack(
         url: URL,
         title: String,
@@ -373,6 +460,7 @@ final class AudioManager: ObservableObject {
         trackDuration = 0
         trackTitle = nil
         trackArtist = nil
+        currentArtworkData = nil
         beatAlignmentConfidence = nil
         beatAlignmentCacheStatus = .none
         beatSyncStatus = .needsConfirmation
@@ -408,6 +496,11 @@ final class AudioManager: ObservableObject {
             } else {
                 trackTitle = url.deletingPathExtension().lastPathComponent
             }
+
+            // 아트워크 로딩 (Now Playing Info Center 공급용)
+            let artworkData = await Self.loadArtworkData(from: asset)
+            guard generation == trackGeneration else { return }
+            currentArtworkData = artworkData
 
             // 곡 영구 BPM override를 위한 identity 키
             let overrideKey = TrackBPMOverrideStore.identityKey(
@@ -1351,6 +1444,20 @@ final class AudioManager: ObservableObject {
             return nil
         }
         return value
+    }
+
+    private static func loadArtworkData(from asset: AVAsset) async -> Data? {
+        do {
+            let metadata = try await asset.load(.commonMetadata)
+            for item in metadata where item.commonKey == .commonKeyArtwork {
+                if let data = try await item.load(.dataValue) {
+                    return data
+                }
+            }
+        } catch {
+            // 아트워크 로딩 실패는 치명적이지 않음 — 조용히 무시
+        }
+        return nil
     }
 }
 

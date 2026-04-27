@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1100" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif">
+  <!-- ============================================================ -->
+  <!-- Cadenza Live Activity — Lock Screen Mockup (v2)             -->
+  <!-- Changes from v1:                                             -->
+  <!--   · BPM number smaller (28pt)                                -->
+  <!--   · Control buttons bigger (44pt play, 36pt prev/next)       -->
+  <!--   · Font: IBM Plex Mono for numbers/labels                   -->
+  <!-- ============================================================ -->
+
+  <defs>
+    <linearGradient id="wallpaper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2140"/>
+      <stop offset="50%" stop-color="#1a1030"/>
+      <stop offset="100%" stop-color="#0a0818"/>
+    </linearGradient>
+
+    <linearGradient id="albumArt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f6a96b"/>
+      <stop offset="60%" stop-color="#d94e7a"/>
+      <stop offset="100%" stop-color="#4a2c6e"/>
+    </linearGradient>
+
+    <radialGradient id="breathingGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="70%" stop-color="#00e5c7" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#00e5c7" stop-opacity="0.08"/>
+    </radialGradient>
+
+    <linearGradient id="bezel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1a1a1d"/>
+      <stop offset="50%" stop-color="#2d2d32"/>
+      <stop offset="100%" stop-color="#1a1a1d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="1100" fill="#08080c"/>
+
+  <text x="40" y="50" fill="#f5f5f7" font-size="24" font-weight="700">Cadenza Live Activity — Lock Screen (v2)</text>
+  <text x="40" y="78" fill="#9a9aa5" font-size="14">BPM 축소 · 버튼 확대 · 폰트: IBM Plex Mono (수치/라벨)</text>
+
+  <!-- ============================================================ -->
+  <!-- LEFT: iPhone lockscreen with Expanded Live Activity         -->
+  <!-- ============================================================ -->
+  <g transform="translate(40, 110)">
+    <rect x="0" y="0" width="380" height="780" rx="50" ry="50" fill="url(#bezel)" stroke="#3a3a40" stroke-width="2"/>
+    <rect x="10" y="10" width="360" height="760" rx="42" ry="42" fill="url(#wallpaper)"/>
+
+    <!-- Dynamic Island -->
+    <rect x="140" y="22" width="100" height="30" rx="15" fill="#000"/>
+
+    <!-- Clock -->
+    <text x="190" y="140" text-anchor="middle" fill="#f5f5f7" font-size="80" font-weight="200">8:42</text>
+    <text x="190" y="172" text-anchor="middle" fill="#f5f5f7" font-size="16" font-weight="500" letter-spacing="1">금요일, 4월 23일</text>
+
+    <!-- Live Activity card -->
+    <g transform="translate(30, 480)">
+      <!-- Breathing halo -->
+      <rect x="-4" y="-4" width="328" height="168" rx="24" fill="url(#breathingGlow)"/>
+      <!-- Card background -->
+      <rect x="0" y="0" width="320" height="160" rx="20" fill="#15151c" opacity="0.92"/>
+
+      <!-- Album art -->
+      <rect x="16" y="16" width="64" height="64" rx="10" fill="url(#albumArt)"/>
+
+      <!-- BPM (smaller: 28pt) -->
+      <text x="100" y="40" fill="#f5f5f7" font-size="28" font-weight="500" font-family="'IBM Plex Mono', 'SF Mono', monospace" letter-spacing="1">175</text>
+      <text x="154" y="40" fill="#9a9aa5" font-size="11" font-weight="500" font-family="'IBM Plex Mono', monospace" letter-spacing="1.5">SPM</text>
+
+      <!-- Progress bar -->
+      <rect x="100" y="52" width="200" height="3" rx="1.5" fill="#2a2a35"/>
+      <rect x="100" y="52" width="120" height="3" rx="1.5" fill="#00e5c7"/>
+      <text x="100" y="70" fill="#5a5a65" font-size="10" font-family="'IBM Plex Mono', monospace">1:52</text>
+      <text x="300" y="70" text-anchor="end" fill="#5a5a65" font-size="10" font-family="'IBM Plex Mono', monospace">3:04</text>
+
+      <!-- Track info -->
+      <text x="16" y="100" fill="#f5f5f7" font-size="13" font-weight="600">Midnight City</text>
+      <text x="16" y="116" fill="#9a9aa5" font-size="11">M83</text>
+
+      <!-- Control buttons (BIGGER) -->
+      <g>
+        <!-- Prev (36pt) -->
+        <g transform="translate(108, 126)">
+          <circle cx="18" cy="18" r="18" fill="#2a2a35"/>
+          <g transform="translate(18, 18)" fill="#f5f5f7">
+            <polygon points="-2,0 6,-7 6,7"/>
+            <rect x="-6" y="-7" width="2.5" height="14" rx="0.5"/>
+          </g>
+        </g>
+        <!-- Play/Pause (44pt — primary) -->
+        <g transform="translate(158, 122)">
+          <circle cx="22" cy="22" r="22" fill="#00e5c7"/>
+          <rect x="15" y="12" width="5" height="20" rx="0.5" fill="#08080c"/>
+          <rect x="24" y="12" width="5" height="20" rx="0.5" fill="#08080c"/>
+        </g>
+        <!-- Next (36pt) -->
+        <g transform="translate(220, 126)">
+          <circle cx="18" cy="18" r="18" fill="#2a2a35"/>
+          <g transform="translate(18, 18)" fill="#f5f5f7">
+            <polygon points="2,0 -6,-7 -6,7"/>
+            <rect x="3.5" y="-7" width="2.5" height="14" rx="0.5"/>
+          </g>
+        </g>
+      </g>
+    </g>
+
+    <!-- Flashlight / camera buttons -->
+    <g opacity="0.6">
+      <circle cx="60" cy="720" r="24" fill="#1a1a22"/>
+      <circle cx="320" cy="720" r="24" fill="#1a1a22"/>
+    </g>
+
+    <!-- Home indicator -->
+    <rect x="140" y="758" width="100" height="4" rx="2" fill="#f5f5f7" opacity="0.8"/>
+  </g>
+
+  <!-- Caption -->
+  <text x="230" y="920" text-anchor="middle" fill="#9a9aa5" font-size="13" font-weight="600">Expanded — 잠금화면 기본</text>
+  <text x="230" y="940" text-anchor="middle" fill="#5a5a65" font-size="11">BPM 28pt · 재생버튼 44pt · 이전/다음 36pt</text>
+  <text x="230" y="958" text-anchor="middle" fill="#5a5a65" font-size="11">배경 시안 할로 = 비트마다 ±3% 밝기 호흡</text>
+
+  <!-- ============================================================ -->
+  <!-- Dynamic Island Compact                                      -->
+  <!-- ============================================================ -->
+  <g transform="translate(490, 130)">
+    <text x="0" y="0" fill="#9a9aa5" font-size="13" font-weight="600">Dynamic Island — Compact</text>
+    <text x="0" y="20" fill="#5a5a65" font-size="11">평소 상태. 상단에 항상 보임.</text>
+
+    <rect x="0" y="40" width="380" height="120" rx="20" fill="#08080c" stroke="#2a2a35"/>
+    <text x="24" y="76" fill="#f5f5f7" font-size="16" font-weight="600">8:42</text>
+    <text x="340" y="76" text-anchor="end" fill="#f5f5f7" font-size="12">●●●● 5G 94%</text>
+
+    <g transform="translate(120, 62)">
+      <rect x="0" y="0" width="44" height="32" rx="16" fill="#000"/>
+      <rect x="4" y="4" width="24" height="24" rx="5" fill="url(#albumArt)"/>
+      <rect x="52" y="0" width="36" height="32" rx="16" fill="#000"/>
+      <rect x="96" y="0" width="60" height="32" rx="16" fill="#000"/>
+      <text x="126" y="22" text-anchor="middle" fill="#00e5c7" font-size="15" font-weight="500" font-family="'IBM Plex Mono', monospace">175</text>
+    </g>
+
+    <text x="190" y="190" text-anchor="middle" fill="#5a5a65" font-size="11">좌: 앨범커버 / 우: BPM (IBM Plex Mono)</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- Dynamic Island Minimal                                      -->
+  <!-- ============================================================ -->
+  <g transform="translate(490, 350)">
+    <text x="0" y="0" fill="#9a9aa5" font-size="13" font-weight="600">Dynamic Island — Minimal</text>
+    <text x="0" y="20" fill="#5a5a65" font-size="11">다른 앱이 DI 점유 시.</text>
+
+    <rect x="0" y="40" width="380" height="120" rx="20" fill="#08080c" stroke="#2a2a35"/>
+    <text x="24" y="76" fill="#f5f5f7" font-size="16" font-weight="600">8:42</text>
+    <text x="340" y="76" text-anchor="end" fill="#f5f5f7" font-size="12">●●●● 5G 94%</text>
+
+    <g transform="translate(140, 62)">
+      <rect x="0" y="0" width="80" height="32" rx="16" fill="#000"/>
+      <circle cx="16" cy="16" r="7" fill="#34c759"/>
+      <text x="34" y="21" fill="#f5f5f7" font-size="12">2 min</text>
+      <circle cx="100" cy="16" r="12" fill="#000"/>
+      <rect x="92" y="8" width="16" height="16" rx="3" fill="url(#albumArt)"/>
+    </g>
+
+    <text x="190" y="190" text-anchor="middle" fill="#5a5a65" font-size="11">앨범커버만. "재생 중" 힌트.</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- Button size comparison                                      -->
+  <!-- ============================================================ -->
+  <g transform="translate(490, 570)">
+    <text x="0" y="0" fill="#9a9aa5" font-size="13" font-weight="600">버튼 크기 비교 (실제 픽셀)</text>
+    <text x="0" y="20" fill="#5a5a65" font-size="11">애플 HIG 최소 탭 타겟 44pt · 러닝 중 땀 엄지는 더 커야 안전</text>
+
+    <!-- v1 sizes -->
+    <g transform="translate(0, 50)">
+      <text x="0" y="0" fill="#5a5a65" font-size="11">이전 (v1):</text>
+      <circle cx="80" cy="14" r="14" fill="#2a2a35"/>
+      <text x="100" y="18" fill="#5a5a65" font-size="10">28pt</text>
+      <circle cx="150" cy="12" r="16" fill="#00e5c7"/>
+      <text x="172" y="18" fill="#5a5a65" font-size="10">32pt</text>
+      <circle cx="220" cy="14" r="14" fill="#2a2a35"/>
+      <text x="240" y="18" fill="#5a5a65" font-size="10">28pt</text>
+    </g>
+
+    <!-- v2 sizes -->
+    <g transform="translate(0, 100)">
+      <text x="0" y="0" fill="#00e5c7" font-size="11" font-weight="600">현재 (v2):</text>
+      <circle cx="80" cy="18" r="18" fill="#2a2a35"/>
+      <text x="104" y="22" fill="#f5f5f7" font-size="10">36pt</text>
+      <circle cx="160" cy="18" r="22" fill="#00e5c7"/>
+      <text x="188" y="22" fill="#f5f5f7" font-size="10">44pt</text>
+      <circle cx="240" cy="18" r="18" fill="#2a2a35"/>
+      <text x="264" y="22" fill="#f5f5f7" font-size="10">36pt</text>
+    </g>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- Summary                                                      -->
+  <!-- ============================================================ -->
+  <g transform="translate(40, 980)">
+    <rect x="0" y="0" width="820" height="100" rx="12" fill="#15151c" stroke="#2a2a35"/>
+    <text x="20" y="28" fill="#f5f5f7" font-size="14" font-weight="700">디자인 결정 요약 (v2)</text>
+
+    <text x="20" y="52" fill="#9a9aa5" font-size="12">
+      <tspan font-weight="600" fill="#00e5c7">●</tspan> BPM 28pt, IBM Plex Mono (상태값 역할)
+    </text>
+    <text x="300" y="52" fill="#9a9aa5" font-size="12">
+      <tspan font-weight="600" fill="#00e5c7">●</tspan> 재생 44pt · 이전/다음 36pt (땀 엄지용)
+    </text>
+    <text x="560" y="52" fill="#9a9aa5" font-size="12">
+      <tspan font-weight="600" fill="#00e5c7">●</tspan> 앨범커버 64pt 정사각, 원본 유지
+    </text>
+
+    <text x="20" y="76" fill="#9a9aa5" font-size="12">
+      <tspan font-weight="600" fill="#00e5c7">●</tspan> 배경 호흡 ±3% (카드 주변 시안 할로)
+    </text>
+    <text x="400" y="76" fill="#9a9aa5" font-size="12">
+      <tspan font-weight="600" fill="#00e5c7">●</tspan> 곡정보 &gt; BPM (시각 위계 역전)
+    </text>
+  </g>
+</svg>
