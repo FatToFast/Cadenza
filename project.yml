@@ -17,6 +17,9 @@ targets:
     platform: iOS
     sources:
       - Cadenza
+    dependencies:
+      - target: CadenzaLiveActivity
+        embed: true
     configFiles:
       Debug: Cadenza.xcconfig
       Release: Cadenza.xcconfig
@@ -30,6 +33,24 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: false
         SWIFT_STRICT_CONCURRENCY: complete
+  CadenzaLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - CadenzaLiveActivity
+      - path: Cadenza/Models/CadenzaActivityAttributes.swift
+      - path: Cadenza/Utilities/Constants.swift
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: CadenzaLiveActivity/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.jy.cadenza.LiveActivity
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: false
+        SWIFT_STRICT_CONCURRENCY: complete
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        SKIP_INSTALL: YES
   CadenzaTests:
     type: bundle.unit-test
     platform: iOS

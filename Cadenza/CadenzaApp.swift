@@ -5,6 +5,7 @@ struct CadenzaApp: App {
     @StateObject private var audioManager = AudioManager()
     @State private var nowPlayingCoordinator: NowPlayingCenterCoordinator?
     @State private var remoteCommandCoordinator: RemoteCommandCoordinator?
+    @State private var liveActivityCoordinator: LiveActivityCoordinator?
 
     var body: some Scene {
         WindowGroup {
@@ -17,6 +18,9 @@ struct CadenzaApp: App {
                     }
                     if remoteCommandCoordinator == nil {
                         remoteCommandCoordinator = RemoteCommandCoordinator(audio: audioManager)
+                    }
+                    if liveActivityCoordinator == nil {
+                        liveActivityCoordinator = LiveActivityCoordinator(audio: audioManager)
                     }
                 }
         }

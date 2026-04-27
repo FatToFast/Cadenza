@@ -36,6 +36,8 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>메트로놈에 맞춰 Apple Music 보관함 곡과 스트리밍 곡을 선택합니다.</string>
 	<key>UILaunchScreen</key>
