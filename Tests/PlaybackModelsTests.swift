@@ -115,6 +115,91 @@ final class PlaybackModelsTests: XCTestCase {
         )
     }
 
+    func testBeatSyncReliabilityAcceptsConfidentStableBeatGrid() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.74,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .automaticBeatSync)
+        XCTAssertNil(assessment.issue)
+        XCTAssertTrue(assessment.shouldUseBeatGrid)
+        XCTAssertEqual(assessment.beatCount, 4)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyForLowConfidence() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.21,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .lowConfidence)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityRejectsUnstableBeatGrid() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.8,
+            beatTimesSeconds: [0.0, 0.5, 1.18, 1.47, 2.1]
+        )
+
+        XCTAssertEqual(assessment.status, .unstableBeatGrid)
+        XCTAssertEqual(assessment.issue, .unstableBeatGrid)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyWhenGridIsMissing() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.9,
+            beatTimesSeconds: []
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .missingBeatGrid)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityFallsBackToBPMOnlyWhenGridHasTooFewBeats() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: 120,
+            confidence: 0.9,
+            beatTimesSeconds: [0.0, 0.5, 1.0]
+        )
+
+        XCTAssertEqual(assessment.status, .bpmOnly)
+        XCTAssertEqual(assessment.issue, .missingBeatGrid)
+        XCTAssertEqual(assessment.beatCount, 3)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncReliabilityNeedsConfirmationWhenBPMIsMissing() {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: nil,
+            confidence: 0.9,
+            beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
+        )
+
+        XCTAssertEqual(assessment.status, .needsConfirmation)
+        XCTAssertEqual(assessment.issue, .missingBPM)
+        XCTAssertFalse(assessment.shouldUseBeatGrid)
+    }
+
+    func testBeatSyncStatusHelperExplainsBPMOnlyReasonsSeparately() {
+        XCTAssertEqual(
+            BeatSyncStatus.bpmOnly.helperText(issue: .missingBeatGrid),
+            "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 메트로놈을 실행하지 않습니다."
+        )
+        XCTAssertEqual(
+            BeatSyncStatus.bpmOnly.helperText(issue: .lowConfidence),
+            "분석 신뢰도가 낮아 메트로놈을 실행하지 않습니다."
+        )
+    }
+
     func testClearingErrorLeavesNonErrorStateUntouched() {
         XCTAssertEqual(
             PlaybackStateRecovery.stateAfterClearingError(
@@ -345,5 +430,58 @@ final class PlaybackModelsTests: XCTestCase {
 
         XCTAssertEqual(fit.status, .unsuitable)
         XCTAssertEqual(fit.badgeText, "러닝 부적합")
+    }
+
+    // MARK: - BPMOctaveChoice
+
+    func testBPMOctavePairFromHighBPM() {
+        let pair = BPMOctaveChoice.ambiguousPair(for: 174)
+        XCTAssertEqual(pair, BPMOctaveChoicePair(lower: 87, upper: 174))
+    }
+
+    func testBPMOctavePairFromLowBPM() {
+        let pair = BPMOctaveChoice.ambiguousPair(for: 87)
+        XCTAssertEqual(pair, BPMOctaveChoicePair(lower: 87, upper: 174))
+    }
+
+    func testBPMOctavePairNilInMidRange() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 120))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 130))
+    }
+
+    func testBPMOctavePairRejectsOutOfBounds() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 50))
+    }
+
+    func testBPMOctaveDefaultPicksClosestToGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 175), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 90), 87)
+    }
+
+    func testBPMOctaveDefaultPrefersUpperOnTieOrMissingGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: nil), 174)
+        let mid = (87.0 + 174.0) / 2
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: mid), 174)
+    }
+
+    func testBPMOctavePairRejectsInvalidInputs() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 0))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: -1))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: .nan))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: .infinity))
+    }
+
+    func testBPMOctavePairRejectsTooHighDouble() {
+        // 220 over the upper bound — ambiguous pair must not return >220 BPM
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 240))
+    }
+
+    func testBPMOctaveDefaultIgnoresInvalidGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: .nan), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 0), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: -10), 174)
     }
 }

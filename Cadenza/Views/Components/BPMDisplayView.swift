@@ -7,6 +7,7 @@ struct BPMDisplayView: View {
     let originalBPM: Double
     let playbackRate: Double
     let originalBPMSource: OriginalBPMSource
+    var cadenceFit: RunningCadenceFit? = nil
 
     var body: some View {
         VStack(spacing: 4) {
@@ -19,6 +20,11 @@ struct BPMDisplayView: View {
             Text("spm")
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
+
+            if let cadenceFit, cadenceFit.status != .unknown {
+                cadenceFitBadge(cadenceFit)
+                    .padding(.top, 6)
+            }
 
             Spacer().frame(height: 12)
 
@@ -54,6 +60,36 @@ struct BPMDisplayView: View {
             Text("재생속도 \(String(format: "%.2fx", playbackRate))")
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextTertiary)
+        }
+    }
+
+    private func cadenceFitBadge(_ fit: RunningCadenceFit) -> some View {
+        let color = fitColor(for: fit)
+        return Text(fit.badgeText)
+            .font(.cadenzaCaption)
+            .foregroundColor(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
+            .accessibilityLabel("러닝 적합도: \(fit.badgeText)")
+    }
+
+    private func fitColor(for fit: RunningCadenceFit) -> Color {
+        if fit.riskReason != nil {
+            return .cadenzaWarning
+        }
+        switch fit.status {
+        case .excellent:
+            return .cadenzaAccent
+        case .usable:
+            return Color.cadenzaAccent.opacity(0.8)
+        case .awkward:
+            return .cadenzaWarning
+        case .unsuitable:
+            return .cadenzaWarning
+        case .unknown:
+            return .cadenzaTextTertiary
         }
     }
 

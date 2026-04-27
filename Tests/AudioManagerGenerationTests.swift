@@ -39,4 +39,46 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.targetBPM, 90)
         XCTAssertEqual(audio.playbackRate, 90 / 89.96, accuracy: 0.0001)
     }
+
+    func testMetronomeRequiresAcceptedBeatGrid() {
+        let audio = AudioManager()
+
+        XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
+
+        audio.setStreamingBeatAlignment(
+            bpm: 120,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.beatSyncStatus, .bpmOnly)
+        XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
+
+        audio.setStreamingBeatAlignment(
+            bpm: 120,
+            source: .analysis,
+            beatOffsetSeconds: 0.1,
+            beatTimesSeconds: [0.1, 0.6, 1.1, 1.6],
+            confidence: 0.8
+        )
+
+        XCTAssertEqual(audio.beatSyncStatus, .automaticBeatSync)
+        XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
+    }
+
+    func testLowConfidenceBeatGridDoesNotAllowMetronome() {
+        let audio = AudioManager()
+
+        audio.setStreamingBeatAlignment(
+            bpm: 120,
+            source: .analysis,
+            beatOffsetSeconds: 0.1,
+            beatTimesSeconds: [0.1, 0.6, 1.1, 1.6],
+            confidence: 0.2
+        )
+
+        XCTAssertEqual(audio.beatSyncStatus, .bpmOnly)
+        XCTAssertEqual(audio.beatSyncIssue, .lowConfidence)
+        XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
+    }
 }

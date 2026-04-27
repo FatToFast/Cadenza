@@ -92,6 +92,8 @@ final class AudioManager: ObservableObject {
     @Published private(set) var trackDuration: TimeInterval = 0
     @Published private(set) var beatAlignmentConfidence: Double?
     @Published private(set) var beatAlignmentCacheStatus: BeatAlignmentCacheStatus = .none
+    @Published private(set) var beatSyncStatus: BeatSyncStatus = .needsConfirmation
+    @Published private(set) var beatSyncIssue: BeatSyncReliabilityIssue? = .missingBPM
     @Published private(set) var manualBeatOffsetNudge: TimeInterval = 0
     @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
         didSet { handleMetronomeEnabledChange() }
@@ -112,13 +114,16 @@ final class AudioManager: ObservableObject {
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
     var hasLoadedTrack: Bool { audioFile != nil }
-    var canStartPlayback: Bool { audioFile != nil || metronomeEnabled }
+    var canStartPlayback: Bool { audioFile != nil || canRunMetronomeForCurrentBeatSync }
     var needsOriginalBPMInput: Bool { audioFile != nil && originalBPMSource == .assumedDefault }
     var playbackProgress: Double {
         guard trackDuration > 0 else { return 0 }
         return min(max(currentPlaybackTime / trackDuration, 0), 1)
     }
     var hasBeatAlignmentAnalysis: Bool { beatAlignmentAnalysis != nil }
+    var canRunMetronomeForCurrentBeatSync: Bool {
+        metronomeEnabled && beatSyncStatus.usesBeatGrid
+    }
     var effectiveBeatOffset: TimeInterval {
         let beatDuration = 60.0 / max(originalBPM, 1)
         return BeatOffsetAdjustment.effectiveOffset(
@@ -175,6 +180,8 @@ final class AudioManager: ObservableObject {
     /// 트랙 수명 동안 권한을 유지하고, 새 파일 로드 또는 해제 시 반납한다.
     private var currentAccessedURL: URL?
     private var currentTrackURL: URL?
+    private var currentTrackOverrideKey: String?
+    private let bpmOverrideStore: TrackBPMOverrideStore
     private var isAudioSessionConfigured = false
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
@@ -185,7 +192,8 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Init
 
-    init() {
+    init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
+        self.bpmOverrideStore = bpmOverrideStore
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
@@ -353,6 +361,7 @@ final class AudioManager: ObservableObject {
         // 이전 파일의 security-scoped 권한 반납
         releaseCurrentURL()
         currentTrackURL = nil
+        currentTrackOverrideKey = nil
 
         state = .loading
         errorMessage = nil
@@ -366,6 +375,8 @@ final class AudioManager: ObservableObject {
         trackArtist = nil
         beatAlignmentConfidence = nil
         beatAlignmentCacheStatus = .none
+        beatSyncStatus = .needsConfirmation
+        beatSyncIssue = .missingBPM
         manualBeatOffsetNudge = 0
         sourceBeatOffsetSeconds = 0
         sourceBeatTimesSeconds = []
@@ -398,17 +409,32 @@ final class AudioManager: ObservableObject {
                 trackTitle = url.deletingPathExtension().lastPathComponent
             }
 
+            // 곡 영구 BPM override를 위한 identity 키
+            let overrideKey = TrackBPMOverrideStore.identityKey(
+                .fileMetadata(
+                    title: trackTitle,
+                    artist: trackArtist,
+                    lastPathComponent: url.lastPathComponent
+                )
+            )
+            currentTrackOverrideKey = overrideKey
+            let storedOverride = bpmOverrideStore.bpm(forIdentity: overrideKey)
+
             // BPM 메타데이터 읽기
             let metadataBPM = await BPMMetadataReader.readBPM(from: url)
             if let bpm = metadataBPM {
                 originalBPM = bpm
                 _bpmFromMetadata = true
                 originalBPMSource = .metadata
+                beatSyncStatus = .bpmOnly
+                beatSyncIssue = .missingBeatGrid
                 logger.info("[track_loaded] BPM from metadata: \(bpm)")
             } else {
                 originalBPM = BPMRange.originalDefault
                 _bpmFromMetadata = false
                 originalBPMSource = .assumedDefault
+                beatSyncStatus = .needsConfirmation
+                beatSyncIssue = .missingBPM
                 logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
             }
 
@@ -424,8 +450,7 @@ final class AudioManager: ObservableObject {
                 beatAlignmentAnalysis = analysis
                 beatAlignmentConfidence = analysis.confidence
                 manualBeatOffsetNudge = analysis.manualNudgeSeconds
-                sourceBeatOffsetSeconds = effectiveOffset(for: analysis)
-                sourceBeatTimesSeconds = effectiveBeatTimes(for: analysis)
+                applyBeatSyncAssessment(from: analysis)
                 if metadataBPM == nil {
                     originalBPM = analysis.estimatedBPM
                     _bpmFromMetadata = false
@@ -433,6 +458,20 @@ final class AudioManager: ObservableObject {
                     logger.info("[track_loaded] BPM from audio analysis: \(analysis.estimatedBPM)")
                 }
                 logger.info("[track_loaded] Beat offset from analysis: \(analysis.beatOffsetSeconds)s beatCount=\(analysis.beatTimesSeconds?.count ?? 0) confidence=\(analysis.confidence) cache=\(self.beatAlignmentCacheStatus.rawValue)")
+            }
+
+            // 사용자 override는 모든 자동 결정보다 우선
+            if let storedOverride,
+               storedOverride >= BPMRange.originalMin,
+               storedOverride <= BPMRange.originalMax {
+                originalBPM = storedOverride
+                _bpmFromMetadata = false
+                originalBPMSource = .manual
+                beatSyncStatus = .bpmOnly
+                beatSyncIssue = .missingBeatGrid
+                sourceBeatOffsetSeconds = 0
+                sourceBeatTimesSeconds = []
+                logger.info("[track_loaded] Applied user BPM override: \(storedOverride)")
             }
 
             applyAutomaticTargetBPM()
@@ -443,6 +482,8 @@ final class AudioManager: ObservableObject {
             audioFile = nil
             originalBPM = BPMRange.originalDefault
             originalBPMSource = .assumedDefault
+            beatSyncStatus = .needsConfirmation
+            beatSyncIssue = .missingBPM
             state = .error
             errorMessage = Self.userFacingLoadError(for: url)
             // 로드 실패 시 권한도 반납
@@ -469,11 +510,17 @@ final class AudioManager: ObservableObject {
             if state == .ready {
                 trackTitle = preset.title
                 trackArtist = preset.artist
-                if !hasBPMFromMetadata {
+                // Preset BPM fallback applies only when no stronger source already set
+                // originalBPM. Manual override and parsed metadata both win over preset.
+                let strongerSourceWins = hasBPMFromMetadata || originalBPMSource == .manual
+                if !strongerSourceWins {
                     originalBPM = preset.bpm
-                    // Preset fallback uses the bundled sample's known BPM, not file metadata.
                     _bpmFromMetadata = false
                     originalBPMSource = .preset
+                    if sourceBeatTimesSeconds.isEmpty {
+                        beatSyncStatus = .bpmOnly
+                        beatSyncIssue = .missingBeatGrid
+                    }
                     applyAutomaticTargetBPM()
                 }
             }
@@ -488,7 +535,7 @@ final class AudioManager: ObservableObject {
 
     func play() {
         let canResumeTrack = state == .ready || state == .paused
-        let canStartMetronomeOnly = state == .idle && audioFile == nil && metronomeEnabled
+        let canStartMetronomeOnly = state == .idle && audioFile == nil && canRunMetronomeForCurrentBeatSync
         guard canResumeTrack || canStartMetronomeOnly else { return }
         guard canStartPlayback else { return }
 
@@ -509,7 +556,7 @@ final class AudioManager: ObservableObject {
                 playerNode.play(at: playbackAnchor)
                 startProgressUpdates()
             }
-            if metronomeEnabled {
+            if canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: sourceTime,
                     anchorHostTime: playbackAnchor.hostTime
@@ -549,6 +596,10 @@ final class AudioManager: ObservableObject {
 
     func startExternalMetronomePlayback(alignedToSourceTime sourceTime: TimeInterval = 0) {
         guard metronomeEnabled else {
+            stopExternalMetronomePlayback()
+            return
+        }
+        guard canRunMetronomeForCurrentBeatSync else {
             stopExternalMetronomePlayback()
             return
         }
@@ -626,7 +677,7 @@ final class AudioManager: ObservableObject {
                 switch self.playbackEndBehavior {
                 case .loop:
                     self.scheduleLoop()
-                    if self.metronomeEnabled {
+                    if self.canRunMetronomeForCurrentBeatSync {
                         self.startMetronome(alignedToSourceTime: 0, anchorHostTime: mach_absolute_time())
                     }
                     logger.debug("Loop: re-scheduled (gen=\(capturedGeneration))")
@@ -659,7 +710,30 @@ final class AudioManager: ObservableObject {
         originalBPM = bpm
         _bpmFromMetadata = false
         originalBPMSource = .manual
+        beatSyncStatus = .bpmOnly
+        beatSyncIssue = .missingBeatGrid
+        stopMetronomeIfBeatSyncRejected()
+        sourceBeatOffsetSeconds = 0
+        sourceBeatTimesSeconds = []
         errorMessage = nil
+        if let key = currentTrackOverrideKey {
+            bpmOverrideStore.store(bpm: bpm, forIdentity: key)
+        }
+        applyAutomaticTargetBPM()
+    }
+
+    /// half/double-time 후보 중 목표 케이던스에 가까운 BPM을 임시로 적용한다.
+    /// 사용자가 명시적으로 선택한 것이 아니므로 영구 저장하지 않고
+    /// `originalBPMSource`도 바꾸지 않아 UI에 후보 버튼이 계속 보인다.
+    func applyAutoBPMDefault(_ bpm: Double) {
+        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
+        guard originalBPMSource != .manual else { return }
+        guard abs(originalBPM - bpm) > 0.5 else {
+            applyAutomaticTargetBPM()
+            return
+        }
+        originalBPM = bpm
+        _bpmFromMetadata = false
         applyAutomaticTargetBPM()
     }
 
@@ -671,12 +745,16 @@ final class AudioManager: ObservableObject {
         bpm: Double?,
         source: OriginalBPMSource = .metadata,
         beatOffsetSeconds: TimeInterval?,
-        beatTimesSeconds: [TimeInterval]? = nil
+        beatTimesSeconds: [TimeInterval]? = nil,
+        confidence: Double? = nil
     ) {
         guard let bpm, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
             originalBPM = BPMRange.originalDefault
             _bpmFromMetadata = false
             originalBPMSource = .assumedDefault
+            beatSyncStatus = .needsConfirmation
+            beatSyncIssue = .missingBPM
+            stopMetronomeIfBeatSyncRejected()
             sourceBeatOffsetSeconds = 0
             sourceBeatTimesSeconds = []
             applyAutomaticTargetBPM()
@@ -686,7 +764,15 @@ final class AudioManager: ObservableObject {
         originalBPM = bpm
         _bpmFromMetadata = source == .metadata
         originalBPMSource = source
-        if let beatOffsetSeconds {
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: bpm,
+            confidence: confidence,
+            beatTimesSeconds: beatTimesSeconds ?? []
+        )
+        beatSyncStatus = assessment.status
+        beatSyncIssue = assessment.issue
+        stopMetronomeIfBeatSyncRejected()
+        if assessment.shouldUseBeatGrid, let beatOffsetSeconds {
             let beatDuration = 60.0 / max(bpm, 1)
             sourceBeatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
                 beatOffsetSeconds,
@@ -695,7 +781,9 @@ final class AudioManager: ObservableObject {
         } else {
             sourceBeatOffsetSeconds = 0
         }
-        sourceBeatTimesSeconds = sanitizedBeatTimes(beatTimesSeconds ?? [])
+        sourceBeatTimesSeconds = assessment.shouldUseBeatGrid
+            ? sanitizedBeatTimes(beatTimesSeconds ?? [])
+            : []
         errorMessage = nil
         applyAutomaticTargetBPM()
     }
@@ -713,9 +801,8 @@ final class AudioManager: ObservableObject {
         if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(nextNudge, for: url, analysis: analysis) {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
-            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
-            sourceBeatTimesSeconds = effectiveBeatTimes(for: updated)
-            if state == .playing, metronomeEnabled {
+            applyBeatSyncAssessment(from: updated)
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -732,9 +819,8 @@ final class AudioManager: ObservableObject {
         if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(0, for: url, analysis: analysis) {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
-            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
-            sourceBeatTimesSeconds = effectiveBeatTimes(for: updated)
-            if state == .playing, metronomeEnabled {
+            applyBeatSyncAssessment(from: updated)
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -757,9 +843,8 @@ final class AudioManager: ObservableObject {
         if let updated = try? BeatAlignmentAnalyzer.updateManualNudge(targetNudge, for: url, analysis: analysis) {
             beatAlignmentAnalysis = updated
             manualBeatOffsetNudge = updated.manualNudgeSeconds
-            sourceBeatOffsetSeconds = effectiveOffset(for: updated)
-            sourceBeatTimesSeconds = effectiveBeatTimes(for: updated)
-            if state == .playing, metronomeEnabled {
+            applyBeatSyncAssessment(from: updated)
+            if state == .playing, canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentSourcePlaybackTime(),
                     anchorHostTime: mach_absolute_time()
@@ -794,7 +879,7 @@ final class AudioManager: ObservableObject {
             let playbackAnchor = makePlaybackAnchor()
             playerNode.play(at: playbackAnchor)
             startProgressUpdates()
-            if metronomeEnabled {
+            if canRunMetronomeForCurrentBeatSync {
                 startMetronome(
                     alignedToSourceTime: currentPlaybackTime,
                     anchorHostTime: playbackAnchor.hostTime
@@ -855,11 +940,21 @@ final class AudioManager: ObservableObject {
 
     private func restartMetronomeIfNeeded() {
         guard isMetronomeRunning, metronomeEnabled else { return }
+        guard canRunMetronomeForCurrentBeatSync else {
+            stopMetronome()
+            return
+        }
         guard !isExternalMetronomePlaybackActive else { return }
         startMetronome(
             alignedToSourceTime: currentSourcePlaybackTime(),
             anchorHostTime: mach_absolute_time()
         )
+    }
+
+    private func stopMetronomeIfBeatSyncRejected() {
+        guard !beatSyncStatus.usesBeatGrid else { return }
+        isExternalMetronomePlaybackActive = false
+        stopMetronome()
     }
 
     /// playerNode → timePitch → mixer 경로와 metronomeNode → mixer 경로의 지연 차이를 캐시한다.
@@ -880,7 +975,10 @@ final class AudioManager: ObservableObject {
         alignedToSourceTime sourceTime: TimeInterval = 0,
         anchorHostTime: UInt64
     ) {
-        guard metronomeEnabled else { return }
+        guard canRunMetronomeForCurrentBeatSync else {
+            stopMetronome()
+            return
+        }
 
         stopMetronome()
         let gridPlan = BeatGridSyncPlanner.planNextBeat(
@@ -1040,6 +1138,20 @@ final class AudioManager: ObservableObject {
             manualNudge: analysis.manualNudgeSeconds,
             beatDuration: beatDuration
         )
+    }
+
+    private func applyBeatSyncAssessment(from analysis: BeatAlignmentAnalysis) {
+        let effectiveTimes = effectiveBeatTimes(for: analysis)
+        let assessment = BeatSyncReliability.assess(
+            originalBPM: analysis.estimatedBPM,
+            confidence: analysis.confidence,
+            beatTimesSeconds: effectiveTimes
+        )
+        beatSyncStatus = assessment.status
+        beatSyncIssue = assessment.issue
+        stopMetronomeIfBeatSyncRejected()
+        sourceBeatOffsetSeconds = assessment.shouldUseBeatGrid ? effectiveOffset(for: analysis) : 0
+        sourceBeatTimesSeconds = assessment.shouldUseBeatGrid ? effectiveTimes : []
     }
 
     private func effectiveBeatTimes(for analysis: BeatAlignmentAnalysis) -> [TimeInterval] {

@@ -44,7 +44,8 @@ struct PlayerView: View {
                             targetBPM: audio.targetBPM,
                             originalBPM: nowPlaying.originalBPM,
                             playbackRate: audio.playbackRate,
-                            originalBPMSource: nowPlaying.originalBPMSource
+                            originalBPMSource: nowPlaying.originalBPMSource,
+                            cadenceFit: currentCadenceFit
                         )
                         .padding(.vertical, 16)
 
@@ -71,12 +72,17 @@ struct PlayerView: View {
                             originalBPMControls
                                 .padding(.horizontal, 20)
 
-                            if audio.hasBeatAlignmentAnalysis && !streaming.hasSong {
+                            if let pair = ambiguousBPMOctaveChoicePair {
                                 Divider().background(Color.cadenzaDivider)
 
-                                syncDebugSection
+                                bpmChoiceSection(pair: pair)
                                     .padding(.horizontal, 20)
                             }
+
+                            Divider().background(Color.cadenzaDivider)
+
+                            beatSyncStatusSection
+                                .padding(.horizontal, 20)
                         }
 
                         Divider().background(Color.cadenzaDivider)
@@ -167,6 +173,15 @@ struct PlayerView: View {
         }
         .onChange(of: streaming.currentBeatTimesSeconds) { _, _ in
             applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: streaming.currentBeatSyncStatus) { _, _ in
+            applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: audio.originalBPM) { _, _ in
+            applyAutoBPMDefaultIfNeeded()
+        }
+        .onChange(of: audio.originalBPMSource) { _, _ in
+            applyAutoBPMDefaultIfNeeded()
         }
         .onReceive(audio.trackEndedSubject) { _ in
             handleLocalPlaylistTrackEnded()
@@ -486,49 +501,134 @@ struct PlayerView: View {
         .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(nowPlaying.playbackDuration))")
     }
 
-    private var syncDebugSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private var ambiguousBPMOctaveChoicePair: BPMOctaveChoicePair? {
+        guard nowPlaying.originalBPMSource != .manual else { return nil }
+        return BPMOctaveChoice.ambiguousPair(for: nowPlaying.originalBPM)
+    }
+
+    private var currentCadenceFit: RunningCadenceFit? {
+        guard audio.hasLoadedTrack || streaming.hasSong else { return nil }
+        guard nowPlaying.originalBPMSource != .assumedDefault else { return nil }
+
+        let previewSignal: RunningPreviewSignal?
+        if streaming.hasSong {
+            previewSignal = RunningPreviewSignal(
+                confidence: streaming.currentBeatAlignmentConfidence,
+                beatTimesSeconds: streaming.currentBeatTimesSeconds
+            )
+        } else if let confidence = audio.beatAlignmentConfidence {
+            previewSignal = RunningPreviewSignal(
+                confidence: confidence,
+                beatTimesSeconds: []
+            )
+        } else {
+            previewSignal = nil
+        }
+
+        return RunningCadenceFit.evaluate(
+            originalBPM: nowPlaying.originalBPM,
+            targetCadence: audio.targetBPM,
+            previewSignal: previewSignal
+        )
+    }
+
+    private func bpmChoiceSection(pair: BPMOctaveChoicePair) -> some View {
+        let goal = audio.targetBPM
+        let defaultChoice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: goal)
+        let activeBPM = nowPlaying.originalBPM.rounded()
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Sync Debug")
+                Text("BPM 확인")
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextPrimary)
                 Spacer()
-                Text(cacheLabel)
+                Text("자동 선택됨")
                     .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaTextSecondary)
-            }
-
-            HStack {
-                debugMetric(label: "Offset", value: "\(Int((audio.effectiveBeatOffset * 1000).rounded()))ms")
-                Spacer()
-                debugMetric(label: "Nudge", value: signedMilliseconds(audio.manualBeatOffsetNudge))
-                Spacer()
-                debugMetric(label: "Confidence", value: confidenceLabel)
+                    .foregroundColor(.cadenzaTextTertiary)
             }
 
             HStack(spacing: 10) {
-                Button("지금 맞추기") {
-                    audio.alignBeatOffsetToCurrentTap()
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("-40ms") {
-                    audio.nudgeBeatOffset(by: -40)
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("리셋") {
-                    audio.resetBeatOffsetNudge()
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
-
-                Button("+40ms") {
-                    audio.nudgeBeatOffset(by: 40)
-                }
-                .buttonStyle(SyncNudgeButtonStyle())
+                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM, defaultBPM: defaultChoice)
+                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM, defaultBPM: defaultChoice)
             }
 
-            Text("분석값이 어긋나면 곡별로 미세 보정되고 다음 재생에도 그대로 적용됩니다.")
+            Text("목표 \(Int(goal.rounded())) BPM에 가까운 \(Int(defaultChoice)) BPM을 적용했습니다. 다른 값을 누르면 변경됩니다.")
+                .font(.cadenzaCaption)
+                .foregroundColor(.cadenzaTextSecondary)
+        }
+    }
+
+    private func bpmChoiceButton(bpm: Double, activeBPM: Double, defaultBPM: Double) -> some View {
+        let isActive = abs(activeBPM - bpm) < 0.5
+        let label = "\(Int(bpm)) BPM"
+        return Button {
+            confirmBPMChoice(bpm)
+        } label: {
+            VStack(spacing: 4) {
+                Text(label)
+                    .font(.cadenzaBody)
+                if abs(bpm - defaultBPM) < 0.5 {
+                    Text("목표에 가까움")
+                        .font(.cadenzaCaption)
+                        .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
+            .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .accessibilityLabel("\(label) 적용")
+    }
+
+    private func confirmBPMChoice(_ bpm: Double) {
+        if streaming.hasSong {
+            _ = streaming.setManualBPM(bpm)
+            audio.setStreamingBeatAlignment(
+                bpm: bpm,
+                source: .manual,
+                beatOffsetSeconds: nil
+            )
+        } else {
+            audio.setOriginalBPM(bpm)
+        }
+        originalBPMText = "\(Int(bpm))"
+    }
+
+    private func applyAutoBPMDefaultIfNeeded() {
+        guard let pair = ambiguousBPMOctaveChoicePair else { return }
+        let choice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: audio.targetBPM)
+        if streaming.hasSong {
+            // Streaming controller already published a BPM; only adjust if it's the
+            // wrong octave. Avoid touching streaming's source-of-truth except via
+            // the audio manager's lighter auto-default path.
+            audio.applyAutoBPMDefault(choice)
+        } else {
+            audio.applyAutoBPMDefault(choice)
+        }
+    }
+
+    private var beatSyncStatusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("박자 상태")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+                Spacer()
+                Text(currentBeatSyncStatus.labelText)
+                    .font(.cadenzaCaption)
+                    .foregroundColor(beatSyncStatusColor)
+            }
+
+            HStack {
+                beatSyncMetric(label: "신뢰도", value: beatSyncConfidenceLabel)
+                Spacer(minLength: 16)
+                beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "미실행")
+            }
+
+            Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
         }
@@ -664,7 +764,7 @@ struct PlayerView: View {
                 }
             }
 
-            if audio.metronomeEnabled && (audio.state == .playing || streaming.isPlaying) {
+            if audio.metronomeEnabled && currentBeatSyncStatus.usesBeatGrid && (audio.state == .playing || streaming.isPlaying) {
                 Label("메트로놈 동작 중", systemImage: "metronome")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
@@ -966,7 +1066,10 @@ struct PlayerView: View {
     }
 
     private func syncStreamingMetronome() {
-        guard streaming.hasSong, streaming.isPlaying, audio.metronomeEnabled else {
+        guard streaming.hasSong,
+              streaming.isPlaying,
+              audio.metronomeEnabled,
+              streaming.currentBeatSyncStatus.usesBeatGrid else {
             audio.stopExternalMetronomePlayback()
             return
         }
@@ -980,7 +1083,8 @@ struct PlayerView: View {
             bpm: bpm ?? streaming.currentBPM,
             source: streaming.currentBPMSource ?? .metadata,
             beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
-            beatTimesSeconds: streaming.currentBeatTimesSeconds
+            beatTimesSeconds: streaming.currentBeatTimesSeconds,
+            confidence: streaming.currentBeatAlignmentConfidence
         )
         streaming.applyPlaybackRate(audio.playbackRate)
         syncStreamingMetronome()
@@ -1030,7 +1134,7 @@ struct PlayerView: View {
         }
     }
 
-    private func debugMetric(label: String, value: String) -> some View {
+    private func beatSyncMetric(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.cadenzaCaption)
@@ -1041,25 +1145,31 @@ struct PlayerView: View {
         }
     }
 
-    private var cacheLabel: String {
-        switch audio.beatAlignmentCacheStatus {
-        case .hit:
-            return "cache hit"
-        case .miss:
-            return "cache miss"
-        case .none:
-            return "cache none"
-        }
+    private var currentBeatSyncStatus: BeatSyncStatus {
+        streaming.hasSong ? streaming.currentBeatSyncStatus : audio.beatSyncStatus
     }
 
-    private var confidenceLabel: String {
-        guard let confidence = audio.beatAlignmentConfidence else { return "-" }
+    private var currentBeatSyncIssue: BeatSyncReliabilityIssue? {
+        streaming.hasSong ? streaming.currentBeatSyncIssue : audio.beatSyncIssue
+    }
+
+    private var beatSyncConfidenceLabel: String {
+        let confidence = streaming.hasSong
+            ? streaming.currentBeatAlignmentConfidence
+            : audio.beatAlignmentConfidence
+        guard let confidence else { return "-" }
         return "\(Int((confidence * 100).rounded()))%"
     }
 
-    private func signedMilliseconds(_ seconds: TimeInterval) -> String {
-        let milliseconds = Int((seconds * 1000).rounded())
-        return milliseconds >= 0 ? "+\(milliseconds)ms" : "\(milliseconds)ms"
+    private var beatSyncStatusColor: Color {
+        switch currentBeatSyncStatus {
+        case .automaticBeatSync:
+            return .cadenzaAccent
+        case .bpmOnly:
+            return .cadenzaTextSecondary
+        case .needsConfirmation, .unstableBeatGrid:
+            return .cadenzaWarning
+        }
     }
 
     private var displayedPlaybackTime: TimeInterval {
@@ -1090,16 +1200,4 @@ extension UTType {
     static let mp3 = UTType(filenameExtension: "mp3") ?? .audio
     static let mpeg4Audio = UTType("public.mpeg-4-audio") ?? .audio
     static let wav = UTType(filenameExtension: "wav") ?? .audio
-}
-
-private struct SyncNudgeButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.cadenzaCaption)
-            .foregroundColor(.cadenzaTextPrimary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.cadenzaBackgroundSecondary.opacity(configuration.isPressed ? 0.7 : 1))
-            .clipShape(Capsule())
-    }
 }
