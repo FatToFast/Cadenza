@@ -43,8 +43,18 @@ final class RemoteCommandCoordinator {
             return .success
         }
 
-        // next/previous는 플레이리스트 이동이 AudioManager에 흡수된 뒤 활성화한다.
-        center.nextTrackCommand.isEnabled = false
-        center.previousTrackCommand.isEnabled = false
+        center.nextTrackCommand.isEnabled = true
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in await self.audio.nextLocalTrack() }
+            return .success
+        }
+
+        center.previousTrackCommand.isEnabled = true
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in await self.audio.previousLocalTrack() }
+            return .success
+        }
     }
 }
