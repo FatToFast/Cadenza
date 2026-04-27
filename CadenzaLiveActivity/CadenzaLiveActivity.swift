@@ -8,6 +8,9 @@ struct CadenzaLiveActivity: Widget {
             // Lock Screen / banner UI
             LiveActivityExpandedView(state: context.state)
                 .padding(16)
+                .background(
+                    BeatBreathingHalo(bpm: context.state.bpm, isActive: context.state.isPlaying)
+                )
                 .activityBackgroundTint(Color(hex: 0x15151C).opacity(0.92))
                 .activitySystemActionForegroundColor(.cadenzaTextPrimary)
         } dynamicIsland: { context in
@@ -188,5 +191,37 @@ private struct LiveActivityExpandedView: View {
     private func formatted(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds.rounded(.down)))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// 카드 외곽에 BPM에 맞춰 시안 글로우가 펄싱하는 호흡 레이어.
+/// 정지 시 0으로 고정. Reduce Motion이면 정적 약한 글로우만.
+private struct BeatBreathingHalo: View {
+    let bpm: Int
+    let isActive: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let beatInterval = bpm > 0 ? 60.0 / Double(bpm) : 1.0
+        return Group {
+            if !isActive {
+                Color.clear
+            } else if reduceMotion {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.cadenzaAccent.opacity(0.05), lineWidth: 4)
+                    .blur(radius: 6)
+            } else {
+                TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
+                    let elapsed = context.date.timeIntervalSinceReferenceDate
+                    let phase = elapsed.truncatingRemainder(dividingBy: beatInterval) / beatInterval
+                    let opacity = max(0, 0.08 * sin(.pi * phase))
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.cadenzaAccent.opacity(opacity), lineWidth: 4)
+                        .blur(radius: 6)
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }

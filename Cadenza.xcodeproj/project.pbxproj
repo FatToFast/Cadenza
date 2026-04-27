@@ -41,6 +41,7 @@
 		B2A6412E97D5FA9C19A842B7 /* CadenzaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CF2220AAC12580D63D7406 /* CadenzaActivityAttributes.swift */; };
 		B8D91505AC789139D687B299 /* TrackBPMOverrideStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 405DAF8C88AED8E05BDCD05F /* TrackBPMOverrideStore.swift */; };
 		B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */; };
+		B9DDC5DAD225F51F1960FCD7 /* CadenceVisualization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2F31C2D2DA5F06CFAC6E848 /* CadenceVisualization.swift */; };
 		C5ED9251C0C7410C772BC0A2 /* CadenzaLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01D64EEC38D1286EE1B2C1CA /* CadenzaLiveActivity.swift */; };
 		CF6039E0C6C9753D5E277B2A /* TrackBPMOverrideStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5953884936D075B69546E7E2 /* TrackBPMOverrideStoreTests.swift */; };
 		DC62EA8D2AB4222F5B244C3B /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC55B62D7D30E7543446A624 /* QueueItem.swift */; };
@@ -123,6 +124,7 @@
 		C8162D5FCED9335BA2D295D7 /* AudioManagerGenerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManagerGenerationTests.swift; sourceTree = "<group>"; };
 		CE2A6A694299B2A4E0BA32B9 /* CadenzaLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenzaLiveActivityBundle.swift; sourceTree = "<group>"; };
 		D0FFA445142AF0773E16E05F /* GetSongBPMServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetSongBPMServiceTests.swift; sourceTree = "<group>"; };
+		D2F31C2D2DA5F06CFAC6E848 /* CadenceVisualization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenceVisualization.swift; sourceTree = "<group>"; };
 		D32E8307CA39DD324E6A03F0 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		DDFBE399676A3E84FCF154B9 /* Cadenza.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cadenza.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC36716D139A696BBB4F92D0 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
@@ -278,6 +280,7 @@
 			children = (
 				4A32BA6C28AA9E1B8BC3FAA5 /* BPMDisplayView.swift */,
 				81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */,
+				D2F31C2D2DA5F06CFAC6E848 /* CadenceVisualization.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -407,6 +410,7 @@
 				AA033344FA53209F330FD8BA /* BPMMetadataReader.swift in Sources */,
 				FF5D37C411CB473DD5D84C27 /* BPMSliderView.swift in Sources */,
 				F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */,
+				B9DDC5DAD225F51F1960FCD7 /* CadenceVisualization.swift in Sources */,
 				994E629126C017ED8AF178C5 /* CadenzaActivityAttributes.swift in Sources */,
 				78B5299BB1431DCD8C201587 /* CadenzaApp.swift in Sources */,
 				86B687DCC76FF165FAEEB574 /* Constants.swift in Sources */,

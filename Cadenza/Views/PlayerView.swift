@@ -247,6 +247,11 @@ struct PlayerView: View {
         } else if let title = nowPlaying.title {
             // 곡 로드됨 — 곡 정보가 주인공 (runner-first redesign)
             VStack(spacing: 6) {
+                trackArtworkOrCadence
+                    .frame(width: 120, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.bottom, 4)
+
                 Text(title)
                     .font(.cadenzaTrackTitle)
                     .foregroundColor(.cadenzaTextPrimary)
@@ -506,6 +511,20 @@ struct PlayerView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("재생 진행")
         .accessibilityValue("\(formattedTime(displayedPlaybackTime)) / \(formattedTime(nowPlaying.playbackDuration))")
+    }
+
+    @ViewBuilder
+    private var trackArtworkOrCadence: some View {
+        if let data = audio.currentArtworkData, let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            CadenceVisualization(
+                bpm: Int(nowPlaying.originalBPM.rounded()),
+                isActive: audio.state == .playing
+            )
+        }
     }
 
     private var ambiguousBPMOctaveChoicePair: BPMOctaveChoicePair? {
