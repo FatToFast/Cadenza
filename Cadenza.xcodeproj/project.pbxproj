@@ -33,6 +33,7 @@
 		B8D91505AC789139D687B299 /* TrackBPMOverrideStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 405DAF8C88AED8E05BDCD05F /* TrackBPMOverrideStore.swift */; };
 		B99DA34191CBFF4CD2653502 /* Kickdrum Rocket-2.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = F452E50B7BFCBE01310EAC6F /* Kickdrum Rocket-2.mp3 */; };
 		CF6039E0C6C9753D5E277B2A /* TrackBPMOverrideStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5953884936D075B69546E7E2 /* TrackBPMOverrideStoreTests.swift */; };
+		D7F67EFD6F1E6A3BBD51D853 /* AudioManagerOverrideIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFBF84ABAEDACDAC3B341BC /* AudioManagerOverrideIntegrationTests.swift */; };
 		DC62EA8D2AB4222F5B244C3B /* QueueItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC55B62D7D30E7543446A624 /* QueueItem.swift */; };
 		E5852286B1AAFBCAC44835DC /* AppleMusicTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCBFC7FE45602B89F9444C0 /* AppleMusicTrack.swift */; };
 		F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */; };
@@ -66,6 +67,7 @@
 		602E2FD6EF6C08938CEAD6E7 /* CadenzaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CadenzaApp.swift; sourceTree = "<group>"; };
 		680E79CF3B1AD3017D67D89F /* PlaybackModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModelsTests.swift; sourceTree = "<group>"; };
 		684A6C9309C9F2DD7C4C3431 /* BPMMetadataReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMMetadataReader.swift; sourceTree = "<group>"; };
+		6DFBF84ABAEDACDAC3B341BC /* AudioManagerOverrideIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManagerOverrideIntegrationTests.swift; sourceTree = "<group>"; };
 		6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyCompensatorTests.swift; sourceTree = "<group>"; };
 		7AA0A59597F3F64824A928D2 /* PlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackModels.swift; sourceTree = "<group>"; };
 		7BF697DFE37A6CBC6011408E /* AppleMusicStreamingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingController.swift; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 			isa = PBXGroup;
 			children = (
 				C8162D5FCED9335BA2D295D7 /* AudioManagerGenerationTests.swift */,
+				6DFBF84ABAEDACDAC3B341BC /* AudioManagerOverrideIntegrationTests.swift */,
 				59566DD1281A6A5388981901 /* BeatOffsetRefinementTests.swift */,
 				D0FFA445142AF0773E16E05F /* GetSongBPMServiceTests.swift */,
 				6F853D95CFFC426A592D8152 /* LatencyCompensatorTests.swift */,
@@ -333,6 +336,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F5EF0F1D6459904DEDCE405D /* AudioManagerGenerationTests.swift in Sources */,
+				D7F67EFD6F1E6A3BBD51D853 /* AudioManagerOverrideIntegrationTests.swift in Sources */,
 				0C71CE4FFC6FC8B69091148F /* BeatOffsetRefinementTests.swift in Sources */,
 				4EEB15DADAF93884AA1B8A06 /* GetSongBPMServiceTests.swift in Sources */,
 				425E14DBF13E0A27BA524F19 /* LatencyCompensatorTests.swift in Sources */,

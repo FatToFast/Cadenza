@@ -465,4 +465,23 @@ final class PlaybackModelsTests: XCTestCase {
         let mid = (87.0 + 174.0) / 2
         XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: mid), 174)
     }
+
+    func testBPMOctavePairRejectsInvalidInputs() {
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 0))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: -1))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: .nan))
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: .infinity))
+    }
+
+    func testBPMOctavePairRejectsTooHighDouble() {
+        // 220 over the upper bound — ambiguous pair must not return >220 BPM
+        XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 240))
+    }
+
+    func testBPMOctaveDefaultIgnoresInvalidGoal() {
+        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: .nan), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 0), 174)
+        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: -10), 174)
+    }
 }

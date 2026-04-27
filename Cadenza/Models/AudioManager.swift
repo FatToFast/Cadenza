@@ -510,9 +510,11 @@ final class AudioManager: ObservableObject {
             if state == .ready {
                 trackTitle = preset.title
                 trackArtist = preset.artist
-                if !hasBPMFromMetadata {
+                // Preset BPM fallback applies only when no stronger source already set
+                // originalBPM. Manual override and parsed metadata both win over preset.
+                let strongerSourceWins = hasBPMFromMetadata || originalBPMSource == .manual
+                if !strongerSourceWins {
                     originalBPM = preset.bpm
-                    // Preset fallback uses the bundled sample's known BPM, not file metadata.
                     _bpmFromMetadata = false
                     originalBPMSource = .preset
                     if sourceBeatTimesSeconds.isEmpty {
