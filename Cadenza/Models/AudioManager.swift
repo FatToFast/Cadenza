@@ -718,9 +718,14 @@ final class AudioManager: ObservableObject {
             }
             refreshMetronomeLatencyIfNeeded()
 
-            let playbackAnchor = makePlaybackAnchor()
+            // anchor 시점에 sourceTime이 얼마나 진행해 있을지 미리 보정한다.
+            // makePlaybackAnchor()는 now + 0.06 hostTime이므로 sourceTime도 그만큼 더해야
+            // BeatGridSyncPlanner의 phase 계산이 anchor 시점 기준으로 정확해진다.
+            // 재생 속도는 1.0(스트리밍) 기준 — 로컬 파일도 같은 source clock을 쓴다.
+            let anchorLeadSeconds: TimeInterval = 0.06
+            let playbackAnchor = makePlaybackAnchor(secondsFromNow: anchorLeadSeconds)
             startMetronome(
-                alignedToSourceTime: max(sourceTime, 0),
+                alignedToSourceTime: max(sourceTime + anchorLeadSeconds, 0),
                 anchorHostTime: playbackAnchor.hostTime
             )
             isExternalMetronomePlaybackActive = true
