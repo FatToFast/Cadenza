@@ -92,6 +92,7 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var currentSong: Song?
     @Published private(set) var currentTitle: String?
     @Published private(set) var currentArtist: String?
+    @Published private(set) var currentArtworkURL: URL?
     @Published private(set) var currentBPM: Double?
     @Published private(set) var currentBPMSource: OriginalBPMSource?
     @Published private(set) var currentBeatOffsetSeconds: TimeInterval?
@@ -161,6 +162,7 @@ final class AppleMusicStreamingController: ObservableObject {
             currentSong = song
             currentTitle = song.title
             currentArtist = song.artistName
+            currentArtworkURL = song.artwork?.url(width: 600, height: 600)
             applyResolvedBPM(bpm(for: song))
             startPreviewBPMAnalysisIfNeeded(for: song)
             canShuffle = false
@@ -207,6 +209,7 @@ final class AppleMusicStreamingController: ObservableObject {
             currentSong = nil
             currentTitle = entry.title
             currentArtist = entry.artistName
+            currentArtworkURL = entry.artwork?.url(width: 600, height: 600)
             applyResolvedBPM(bpm(for: entry))
             startPreviewBPMAnalysisIfNeeded(for: entry)
             canShuffle = true
@@ -374,6 +377,7 @@ final class AppleMusicStreamingController: ObservableObject {
         currentSong = nil
         currentTitle = nil
         currentArtist = nil
+        currentArtworkURL = nil
         currentBPM = nil
         currentBPMSource = nil
         currentBeatOffsetSeconds = nil
@@ -507,12 +511,23 @@ final class AppleMusicStreamingController: ObservableObject {
         guard let entry = player.queue.currentEntry else { return }
         currentTitle = entry.title
         currentArtist = artistName(for: entry) ?? entry.subtitle
+        currentArtworkURL = artworkURL(for: entry)
         let resolvedBPM = bpm(for: entry)
         applyResolvedBPM(resolvedBPM)
         if resolvedBPM == nil {
             startPreviewBPMAnalysisIfNeeded(for: entry)
         }
         enforcePlaybackRateIfPlaying(reason: "queue-sync")
+    }
+
+    private func artworkURL(for entry: MusicKit.MusicPlayer.Queue.Entry) -> URL? {
+        if case .song(let song)? = entry.item {
+            return song.artwork?.url(width: 600, height: 600)
+        }
+        if let song = entry.transientItem as? Song {
+            return song.artwork?.url(width: 600, height: 600)
+        }
+        return entry.artwork?.url(width: 600, height: 600)
     }
 
     private func artistName(for entry: MusicKit.MusicPlayer.Queue.Entry) -> String? {

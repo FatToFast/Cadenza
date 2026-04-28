@@ -514,12 +514,27 @@ struct PlayerView: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
+        } else if let url = streaming.currentArtworkURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                case .empty, .failure:
+                    cadenceFallback
+                @unknown default:
+                    cadenceFallback
+                }
+            }
         } else {
-            CadenceVisualization(
-                bpm: Int(nowPlaying.originalBPM.rounded()),
-                isActive: audio.state == .playing
-            )
+            cadenceFallback
         }
+    }
+
+    private var cadenceFallback: some View {
+        CadenceVisualization(
+            bpm: Int(nowPlaying.originalBPM.rounded()),
+            isActive: audio.state == .playing || streaming.isPlaying
+        )
     }
 
     private var ambiguousBPMOctaveChoicePair: BPMOctaveChoicePair? {
