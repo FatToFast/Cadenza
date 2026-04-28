@@ -1,4 +1,3 @@
-import Combine
 import MusicKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1054,24 +1053,6 @@ struct PlayerView: View {
             return
         }
 
-        audio.startExternalMetronomePlayback(alignedToSourceTime: streaming.playbackTime)
-    }
-
-    /// Apple Music 스트리밍 클럭과 메트로놈 자체 클럭 사이의 누적 phase drift를
-    /// 주기적으로 잡는다. metronome은 한 번 시작하면 자체 hostTime으로 진행하기 때문에
-    /// 곡 진행 시간이 흐르면 미세 BPM 추정 오차가 누적된다.
-    private var streamingMetronomeResyncTimer: Publishers.Autoconnect<Timer.TimerPublisher> {
-        Timer.publish(every: 5, on: .main, in: .common).autoconnect()
-    }
-
-    private func resyncStreamingMetronomeIfDrifting() {
-        guard streaming.hasSong,
-              streaming.isPlaying,
-              audio.metronomeEnabled,
-              streaming.currentBeatSyncStatus.usesBeatGrid else { return }
-        // 가장 단순한 보정: 현재 streaming.playbackTime으로 metronome을 다시 시작.
-        // startExternalMetronomePlayback이 이미 anchor lag를 보정하므로 phase가
-        // 여기서 다시 player의 진짜 시간에 정렬된다.
         audio.startExternalMetronomePlayback(alignedToSourceTime: streaming.playbackTime)
     }
 
