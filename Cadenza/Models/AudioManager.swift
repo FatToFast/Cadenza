@@ -122,8 +122,11 @@ final class AudioManager: ObservableObject {
         return min(max(currentPlaybackTime / trackDuration, 0), 1)
     }
     var hasBeatAlignmentAnalysis: Bool { beatAlignmentAnalysis != nil }
+    /// 메트로놈을 동작시킬 수 있는 조건. BPM이 잡혔으면 (`bpmOnly`도 포함) 균등 간격
+    /// 클릭은 가능하다. `needsConfirmation`은 BPM 자체가 미확정이라 막는다.
+    /// grid 기반 정렬은 별도로 `beatSyncStatus.usesBeatGrid`만 본다.
     var canRunMetronomeForCurrentBeatSync: Bool {
-        metronomeEnabled && beatSyncStatus.usesBeatGrid
+        metronomeEnabled && beatSyncStatus.allowsMetronome
     }
     var effectiveBeatOffset: TimeInterval {
         let beatDuration = 60.0 / max(originalBPM, 1)

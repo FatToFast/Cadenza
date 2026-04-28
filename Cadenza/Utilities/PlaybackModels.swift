@@ -373,21 +373,33 @@ enum BeatSyncStatus: Sendable, Equatable {
         case .bpmOnly:
             switch issue {
             case .lowConfidence:
-                return "분석 신뢰도가 낮아 메트로놈을 실행하지 않습니다."
+                return "분석 신뢰도가 낮아 자동 박자 맞춤은 끄고 BPM 균등 간격으로만 메트로놈을 돌립니다."
             case .missingBeatGrid:
-                return "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 메트로놈을 실행하지 않습니다."
+                return "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 BPM 균등 간격으로 메트로놈을 돌립니다."
             case .missingBPM, .unstableBeatGrid, .none:
-                return "자동 박자 위치를 쓰지 못해 메트로놈을 실행하지 않습니다."
+                return "자동 박자 위치를 쓰지 못해 BPM 균등 간격으로 메트로놈을 돌립니다."
             }
         case .needsConfirmation:
-            return "BPM 또는 박자 정보를 더 확인해야 메트로놈을 실행할 수 있습니다."
+            return "BPM이 아직 확정되지 않아 메트로놈을 실행할 수 없습니다."
         case .unstableBeatGrid:
-            return "박자 간격이 불안정해 자동 박자 맞춤을 사용하지 않습니다."
+            return "박자 간격이 불안정해 자동 박자 맞춤은 끄고 BPM 균등 간격으로 메트로놈을 돌립니다."
         }
     }
 
     var usesBeatGrid: Bool {
         self == .automaticBeatSync
+    }
+
+    /// 메트로놈을 동작시킬 수 있는 상태인지. BPM이 잡혀 있으면 (자동 박자 맞춤이든
+    /// BPM만 맞춤이든) 균등 간격 클릭은 줄 수 있다. needsConfirmation은 BPM 자체가
+    /// 미확정이라 막는다.
+    var allowsMetronome: Bool {
+        switch self {
+        case .automaticBeatSync, .bpmOnly, .unstableBeatGrid:
+            return true
+        case .needsConfirmation:
+            return false
+        }
     }
 }
 

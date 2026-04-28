@@ -661,7 +661,7 @@ struct PlayerView: View {
             HStack {
                 beatSyncMetric(label: "신뢰도", value: beatSyncConfidenceLabel)
                 Spacer(minLength: 16)
-                beatSyncMetric(label: "방식", value: currentBeatSyncStatus.usesBeatGrid ? "박자 기준" : "미실행")
+                beatSyncMetric(label: "방식", value: metronomeMethodLabel)
             }
 
             Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
@@ -800,7 +800,7 @@ struct PlayerView: View {
                 }
             }
 
-            if audio.metronomeEnabled && currentBeatSyncStatus.usesBeatGrid && (audio.state == .playing || streaming.isPlaying) {
+            if audio.metronomeEnabled && currentBeatSyncStatus.allowsMetronome && (audio.state == .playing || streaming.isPlaying) {
                 Label("메트로놈 동작 중", systemImage: "metronome")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
@@ -1048,7 +1048,7 @@ struct PlayerView: View {
         guard streaming.hasSong,
               streaming.isPlaying,
               audio.metronomeEnabled,
-              streaming.currentBeatSyncStatus.usesBeatGrid else {
+              streaming.currentBeatSyncStatus.allowsMetronome else {
             audio.stopExternalMetronomePlayback()
             return
         }
@@ -1138,6 +1138,17 @@ struct PlayerView: View {
             : audio.beatAlignmentConfidence
         guard let confidence else { return "-" }
         return "\(Int((confidence * 100).rounded()))%"
+    }
+
+    private var metronomeMethodLabel: String {
+        switch currentBeatSyncStatus {
+        case .automaticBeatSync:
+            return "박자 기준"
+        case .bpmOnly, .unstableBeatGrid:
+            return "BPM 균등"
+        case .needsConfirmation:
+            return "미실행"
+        }
     }
 
     private var beatSyncStatusColor: Color {

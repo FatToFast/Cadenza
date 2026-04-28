@@ -40,11 +40,13 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.playbackRate, 90 / 89.96, accuracy: 0.0001)
     }
 
-    func testMetronomeRequiresAcceptedBeatGrid() {
+    func testMetronomeRequiresConfirmedBPM() {
         let audio = AudioManager()
 
+        // 기본 상태: needsConfirmation — BPM 확정 안 됨
         XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
 
+        // BPM 확정 (grid 없이) — bpmOnly. 균등 간격 메트로놈은 가능해야 함.
         audio.setStreamingBeatAlignment(
             bpm: 120,
             source: .metadata,
@@ -52,8 +54,9 @@ final class AudioManagerGenerationTests: XCTestCase {
         )
 
         XCTAssertEqual(audio.beatSyncStatus, .bpmOnly)
-        XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
+        XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
 
+        // grid까지 신뢰: automaticBeatSync — 정확한 박자 정렬 가능.
         audio.setStreamingBeatAlignment(
             bpm: 120,
             source: .analysis,
@@ -66,7 +69,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
     }
 
-    func testLowConfidenceBeatGridDoesNotAllowMetronome() {
+    func testLowConfidenceBeatGridFallsBackToBPMOnlyMetronome() {
         let audio = AudioManager()
 
         audio.setStreamingBeatAlignment(
@@ -79,6 +82,7 @@ final class AudioManagerGenerationTests: XCTestCase {
 
         XCTAssertEqual(audio.beatSyncStatus, .bpmOnly)
         XCTAssertEqual(audio.beatSyncIssue, .lowConfidence)
-        XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
+        // 새 정책: 신뢰도 낮아도 BPM은 확정된 상태이므로 균등 간격 메트로놈은 동작.
+        XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
     }
 }

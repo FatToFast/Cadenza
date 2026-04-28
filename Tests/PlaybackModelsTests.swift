@@ -192,12 +192,19 @@ final class PlaybackModelsTests: XCTestCase {
     func testBeatSyncStatusHelperExplainsBPMOnlyReasonsSeparately() {
         XCTAssertEqual(
             BeatSyncStatus.bpmOnly.helperText(issue: .missingBeatGrid),
-            "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 메트로놈을 실행하지 않습니다."
+            "BPM은 확인했지만 박자 위치는 충분히 잡지 못해 BPM 균등 간격으로 메트로놈을 돌립니다."
         )
         XCTAssertEqual(
             BeatSyncStatus.bpmOnly.helperText(issue: .lowConfidence),
-            "분석 신뢰도가 낮아 메트로놈을 실행하지 않습니다."
+            "분석 신뢰도가 낮아 자동 박자 맞춤은 끄고 BPM 균등 간격으로만 메트로놈을 돌립니다."
         )
+    }
+
+    func testBeatSyncStatusAllowsMetronomeOnceBPMConfirmed() {
+        XCTAssertFalse(BeatSyncStatus.needsConfirmation.allowsMetronome)
+        XCTAssertTrue(BeatSyncStatus.bpmOnly.allowsMetronome)
+        XCTAssertTrue(BeatSyncStatus.unstableBeatGrid.allowsMetronome)
+        XCTAssertTrue(BeatSyncStatus.automaticBeatSync.allowsMetronome)
     }
 
     func testClearingErrorLeavesNonErrorStateUntouched() {
