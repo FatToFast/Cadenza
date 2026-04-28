@@ -113,6 +113,13 @@ struct LocalFilePlaylist: Sendable, Equatable {
         return currentItem
     }
 
+    /// 큐에서 사용자가 직접 선택한 인덱스로 점프. 범위 밖이면 nil.
+    mutating func jumpTo(index: Int) -> QueueItem? {
+        guard items.indices.contains(index) else { return nil }
+        currentIndex = index
+        return currentItem
+    }
+
     private mutating func shuffleRemaining<R: RandomNumberGenerator>(using generator: inout R) {
         guard let currentItem else { return }
         let remaining = originalItems

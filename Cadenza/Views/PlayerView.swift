@@ -14,6 +14,7 @@ struct PlayerView: View {
     @State private var showAppleMusicPicker = false
     @State private var showAppleMusicStreamingSearch = false
     @State private var showAppleMusicStreamingPlaylists = false
+    @State private var showLocalQueueSheet = false
     @State private var isImportingAppleMusic = false
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
@@ -143,6 +144,10 @@ struct PlayerView: View {
             AppleMusicStreamingPlaylistView { playlist, entry, entries in
                 playAppleMusicPlaylist(playlist, entry: entry, entries: entries)
             }
+        }
+        .sheet(isPresented: $showLocalQueueSheet) {
+            LocalQueueSheet()
+                .environmentObject(audio)
         }
         .onAppear(perform: syncOriginalBPMText)
         .onChange(of: audio.originalBPM) { _, _ in
@@ -282,22 +287,28 @@ struct PlayerView: View {
                     .padding(.top, 4)
 
                 if let queueContext = audio.localPlaylist.queueContext {
-                    VStack(spacing: 4) {
-                        Label(
-                            "\(queueContext.currentIndex + 1) / \(queueContext.totalCount)",
-                            systemImage: audio.localPlaylist.isShuffled ? "shuffle" : "list.bullet"
-                        )
-                        .font(.cadenzaCaption)
-                        .foregroundColor(audio.localPlaylist.isShuffled ? .cadenzaAccent : .cadenzaTextSecondary)
+                    Button {
+                        showLocalQueueSheet = true
+                    } label: {
+                        VStack(spacing: 4) {
+                            Label(
+                                "\(queueContext.currentIndex + 1) / \(queueContext.totalCount)",
+                                systemImage: audio.localPlaylist.isShuffled ? "shuffle" : "list.bullet"
+                            )
+                            .font(.cadenzaCaption)
+                            .foregroundColor(audio.localPlaylist.isShuffled ? .cadenzaAccent : .cadenzaTextSecondary)
 
-                        if let nextTitle = queueContext.nextTitle {
-                            Text("다음 곡: \(nextTitle)")
-                                .font(.cadenzaCaption)
-                                .foregroundColor(.cadenzaTextTertiary)
-                                .lineLimit(1)
+                            if let nextTitle = queueContext.nextTitle {
+                                Text("다음 곡: \(nextTitle)")
+                                    .font(.cadenzaCaption)
+                                    .foregroundColor(.cadenzaTextTertiary)
+                                    .lineLimit(1)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                     .padding(.top, 6)
+                    .accessibilityHint("탭하면 재생 목록에서 곡을 직접 선택할 수 있습니다")
                 }
             }
             .padding(.horizontal, 20)

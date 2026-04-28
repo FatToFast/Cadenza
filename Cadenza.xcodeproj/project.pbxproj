@@ -50,6 +50,7 @@
 		EC464FDC9AA8B25D89727BB9 /* CadenzaLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE2A6A694299B2A4E0BA32B9 /* CadenzaLiveActivityBundle.swift */; };
 		F2476646CB5CB1D1DFBFE199 /* BeatAlignmentAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26296E21E36AC34841A5D37 /* BeatAlignmentAnalyzer.swift */; };
 		F5EF0F1D6459904DEDCE405D /* AudioManagerGenerationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8162D5FCED9335BA2D295D7 /* AudioManagerGenerationTests.swift */; };
+		F8D2DB1FBAFA57C455367DE1 /* LocalQueueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C29D086CABD938CD3584368 /* LocalQueueSheet.swift */; };
 		F9FD6E7EB5DD54DBD0633B67 /* NowPlayingInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 997835964EA4195CD8E9EC1A /* NowPlayingInfoTests.swift */; };
 		FF5D37C411CB473DD5D84C27 /* BPMSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81D771D8AD1AF9544E918BE0 /* BPMSliderView.swift */; };
 /* End PBXBuildFile section */
@@ -90,6 +91,7 @@
 		08725DAEB50A2BE3179BD41E /* StreamingBPMResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingBPMResolverTests.swift; sourceTree = "<group>"; };
 		0BAF3FB994C0A6FFC4979F4A /* AssetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetResolver.swift; sourceTree = "<group>"; };
 		0F3F2132CB8CE16108858F99 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
+		1C29D086CABD938CD3584368 /* LocalQueueSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalQueueSheet.swift; sourceTree = "<group>"; };
 		2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicStreamingPlaylistView.swift; sourceTree = "<group>"; };
 		3D00E3558BD90592C67822AC /* CadenzaLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CadenzaLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3F8FFC774733449AD9A28B63 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
@@ -152,6 +154,7 @@
 				8FAA9392A307FEA406DB5B74 /* AppleMusicLibraryView.swift */,
 				2FD67A0D7A9C5D21076F19E2 /* AppleMusicStreamingPlaylistView.swift */,
 				92F95249D0AD96D91DF31B11 /* AppleMusicStreamingSearchView.swift */,
+				1C29D086CABD938CD3584368 /* LocalQueueSheet.swift */,
 				498EA72F6CA1930D69CB9A0B /* PlayerView.swift */,
 				FF6634F7FE4E287249122CC8 /* Components */,
 			);
@@ -420,6 +423,7 @@
 				4BD0252B1F10762A1441CAC2 /* GetSongBPMService.swift in Sources */,
 				86AAF69FD7B962CF96BF8C1C /* LatencyCompensator.swift in Sources */,
 				1487CF2FB44D1F32424E6F0C /* LiveActivityCoordinator.swift in Sources */,
+				F8D2DB1FBAFA57C455367DE1 /* LocalQueueSheet.swift in Sources */,
 				26BFD0B1BA71B630A502CF5C /* MusicLibraryService.swift in Sources */,
 				A46485893ADA1E6BB12D8DE7 /* NowPlayingCenterCoordinator.swift in Sources */,
 				AF592E8D64596D612783ABBD /* NowPlayingInfo.swift in Sources */,

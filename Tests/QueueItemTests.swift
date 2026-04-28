@@ -100,6 +100,33 @@ final class QueueItemTests: XCTestCase {
         XCTAssertEqual(playlist.queueContext?.currentIndex, 1)
         XCTAssertEqual(playlist.items.map(\.title), ["a", "b", "c", "d"])
     }
+
+    func testJumpToValidIndexUpdatesCurrent() {
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+            URL(fileURLWithPath: "/tmp/c.mp3"),
+        ])
+        XCTAssertEqual(playlist.currentIndex, 0)
+
+        let item = playlist.jumpTo(index: 2)
+
+        XCTAssertEqual(item?.title, "c")
+        XCTAssertEqual(playlist.currentIndex, 2)
+    }
+
+    func testJumpToOutOfBoundsLeavesCurrentUntouched() {
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+        ])
+        _ = playlist.moveToNext() // currentIndex = 1
+        XCTAssertEqual(playlist.currentIndex, 1)
+
+        XCTAssertNil(playlist.jumpTo(index: 5))
+        XCTAssertNil(playlist.jumpTo(index: -1))
+        XCTAssertEqual(playlist.currentIndex, 1)
+    }
 }
 
 private struct FixedRandomNumberGenerator: RandomNumberGenerator {

@@ -367,6 +367,20 @@ final class AudioManager: ObservableObject {
         if shouldAutoPlay, state == .ready { play() }
     }
 
+    /// 큐 시트에서 사용자가 곡을 직접 선택했을 때 호출. 같은 곡이면 noop.
+    /// 재생 중이었다면 새 곡도 재생 상태를 이어간다.
+    func jumpToLocalTrack(at index: Int) async {
+        let shouldAutoPlay = state == .playing
+        guard localPlaylist.currentIndex != index else { return }
+        var playlist = localPlaylist
+        guard let item = playlist.jumpTo(index: index),
+              case .file(let url) = item.source else { return }
+        localPlaylist = playlist
+        syncPlaybackEndBehavior()
+        await loadFile(url: url)
+        if shouldAutoPlay, state == .ready { play() }
+    }
+
     func toggleLocalShuffle() {
         var playlist = localPlaylist
         guard playlist.toggleShuffle() != nil else { return }
