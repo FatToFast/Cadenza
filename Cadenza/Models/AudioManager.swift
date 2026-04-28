@@ -882,7 +882,9 @@ final class AudioManager: ObservableObject {
         beatSyncStatus = assessment.status
         beatSyncIssue = assessment.issue
         stopMetronomeIfBeatSyncRejected()
-        if assessment.shouldUseBeatGrid, let beatOffsetSeconds {
+        // grid 자체는 못 믿더라도 첫 비트 offset은 종종 phase 추정에 도움이 된다.
+        // bpm이 확정된 상태에서 BPM 균등 메트로놈에 첫 박 위상으로 활용한다.
+        if let beatOffsetSeconds {
             let beatDuration = 60.0 / max(bpm, 1)
             sourceBeatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
                 beatOffsetSeconds,
@@ -901,6 +903,24 @@ final class AudioManager: ObservableObject {
     func nudgeTargetBPM(by delta: Double) {
         let next = min(max(targetBPM + delta, BPMRange.targetMin), BPMRange.targetMax)
         targetBPM = next.rounded()
+    }
+
+    /// 사용자가 음악 박자에 맞춰 탭한 순간을 다음 강박 위치로 등록한다.
+    /// streaming은 PCM 분석이 안 되므로 자동 phase가 어긋날 때 한 번 탭으로 정렬한다.
+    /// `currentSourceTime`은 호출 시점의 player.playbackTime.
+    /// 메트로놈이 동작 중이면 새 phase로 즉시 재시작한다.
+    func alignBeatPhaseToNow(currentSourceTime: TimeInterval) {
+        guard originalBPM > 0 else { return }
+        let beatDuration = 60.0 / originalBPM
+        sourceBeatOffsetSeconds = MetronomeSyncPlanner.normalizedOffset(
+            currentSourceTime,
+            beatDuration: beatDuration
+        )
+        // grid는 더 이상 신뢰하지 않는다 — 사용자 탭이 새 phase의 진실이 됨.
+        sourceBeatTimesSeconds = []
+        if isExternalMetronomePlaybackActive {
+            startExternalMetronomePlayback(alignedToSourceTime: currentSourceTime)
+        }
     }
 
     func nudgeBeatOffset(by milliseconds: Double) {

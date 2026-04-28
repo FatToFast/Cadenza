@@ -715,7 +715,39 @@ struct PlayerView: View {
                 .accessibilityLabel("메트로놈 볼륨")
                 .accessibilityValue("\(Int(audio.metronomeVolume * 100)) 퍼센트")
             }
+
+            if canShowAlignBeatButton {
+                Button(action: alignBeatPhaseToNow) {
+                    Label("지금 박자 맞추기", systemImage: "hand.tap")
+                        .font(.cadenzaBody)
+                        .foregroundColor(.cadenzaBackground)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.cadenzaAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("음악 박자에 맞춰 탭하면 메트로놈이 그 순간을 강박으로 맞춥니다")
+
+                Text("메트로놈이 곡과 살짝 어긋날 때 한 번 탭하세요.")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
+    }
+
+    private var canShowAlignBeatButton: Bool {
+        guard audio.metronomeEnabled else { return false }
+        if streaming.hasSong {
+            return streaming.isPlaying && streaming.currentBeatSyncStatus.allowsMetronome
+        }
+        return audio.state == .playing && audio.beatSyncStatus.allowsMetronome
+    }
+
+    private func alignBeatPhaseToNow() {
+        let sourceTime = streaming.hasSong ? streaming.playbackTime : audio.currentPlaybackTime
+        audio.alignBeatPhaseToNow(currentSourceTime: sourceTime)
     }
 
     // MARK: - Playback Controls
