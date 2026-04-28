@@ -199,9 +199,6 @@ struct PlayerView: View {
         .onReceive(audio.trackEndedSubject) { _ in
             handleLocalPlaylistTrackEnded()
         }
-        .onReceive(streamingMetronomeResyncTimer) { _ in
-            resyncStreamingMetronomeIfDrifting()
-        }
         .animation(.easeInOut(duration: 0.2), value: audio.state)
         .animation(.easeInOut(duration: 0.3), value: audio.errorMessage)
     }
