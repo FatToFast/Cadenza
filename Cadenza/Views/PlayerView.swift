@@ -219,9 +219,9 @@ struct PlayerView: View {
     @ViewBuilder
     private var trackInfoSection: some View {
         if let streamingTitle = streaming.title {
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 Text(streamingTitle)
-                    .font(.cadenzaTitle2)
+                    .font(.cadenzaTrackTitle)
                     .foregroundColor(.cadenzaTextPrimary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -233,11 +233,11 @@ struct PlayerView: View {
                         .lineLimit(1)
                 }
 
-                trackSelectionControls
-                    .padding(.top, 2)
+                trackArtworkOrCadence
+                    .frame(width: 220, height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 playbackControls
-                    .padding(.top, 4)
 
                 Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
                     .font(.cadenzaCaption)
@@ -246,17 +246,11 @@ struct PlayerView: View {
                     .padding(.vertical, 4)
                     .background(Color.cadenzaWarning.opacity(0.15))
                     .clipShape(Capsule())
-                    .padding(.top, 4)
             }
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
             // 곡 로드됨 — 곡 정보가 주인공 (runner-first redesign)
-            VStack(spacing: 6) {
-                trackArtworkOrCadence
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .padding(.bottom, 4)
-
+            VStack(spacing: 12) {
                 Text(title)
                     .font(.cadenzaTrackTitle)
                     .foregroundColor(.cadenzaTextPrimary)
@@ -270,11 +264,11 @@ struct PlayerView: View {
                         .lineLimit(1)
                 }
 
-                trackSelectionControls
-                    .padding(.top, 2)
+                trackArtworkOrCadence
+                    .frame(width: 220, height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 playbackControls
-                    .padding(.top, 4)
 
                 // 상태 배지
                 Label("키 락 ON", systemImage: "music.note")
@@ -284,7 +278,6 @@ struct PlayerView: View {
                     .padding(.vertical, 4)
                     .background(Color.cadenzaAccent.opacity(0.15))
                     .clipShape(Capsule())
-                    .padding(.top, 4)
 
                 if let queueContext = audio.localPlaylist.queueContext {
                     Button {
@@ -307,13 +300,12 @@ struct PlayerView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 6)
                     .accessibilityHint("탭하면 재생 목록에서 곡을 직접 선택할 수 있습니다")
                 }
             }
             .padding(.horizontal, 20)
         } else if audio.isMetronomeOnlyMode {
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 Image(systemName: "metronome")
                     .font(.system(size: 32))
                     .foregroundColor(.cadenzaAccent)
@@ -327,17 +319,13 @@ struct PlayerView: View {
                     .foregroundColor(.cadenzaTextSecondary)
                     .multilineTextAlignment(.center)
 
-                trackSelectionControls
-                    .padding(.top, 2)
-
                 playbackControls
-                    .padding(.top, 4)
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
         } else {
             // Empty state (DESIGN.md 2.2.1)
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 Image(systemName: "music.note")
                     .font(.system(size: 32))
                     .foregroundColor(.cadenzaTextTertiary)
@@ -351,11 +339,7 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
 
-                trackSelectionControls
-                    .padding(.top, 2)
-
                 playbackControls
-                    .padding(.top, 4)
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
