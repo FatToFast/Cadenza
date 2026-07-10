@@ -29,6 +29,8 @@ final class AudioManagerGenerationTests: XCTestCase {
 
     func testStreamingBeatAlignmentForNinetyBPMKeepsPlaybackRateNearOne() {
         let audio = AudioManager()
+        // 케이던스를 명시적으로 고정해 UserDefaults 영속값에 의존하지 않게 한다.
+        audio.targetBPM = 180
 
         audio.setStreamingBeatAlignment(
             bpm: 89.96,
@@ -36,8 +38,33 @@ final class AudioManagerGenerationTests: XCTestCase {
             beatOffsetSeconds: nil
         )
 
-        XCTAssertEqual(audio.targetBPM, 90)
+        // 케이던스는 스티키 — 곡 BPM 도착에도 바뀌지 않는다.
+        XCTAssertEqual(audio.targetBPM, 180)
+        // 원곡 89.96에 옥타브 폴딩 → 음악 목표 90 → 배속 ≈ 1.0.
+        XCTAssertEqual(audio.musicalTargetBPM, 90, accuracy: 0.0001)
         XCTAssertEqual(audio.playbackRate, 90 / 89.96, accuracy: 0.0001)
+    }
+
+    /// 스티키 케이던스: streaming BPM 해석이 도착해도 사용자의 케이던스는 유지된다.
+    func testStreamingBeatAlignmentDoesNotOverwriteStickyCadence() {
+        let audio = AudioManager()
+        audio.targetBPM = 170
+
+        audio.setStreamingBeatAlignment(
+            bpm: 85,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        XCTAssertEqual(audio.targetBPM, 170)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+
+        // 다른 곡(원곡 128)으로 바뀌어도 케이던스는 그대로.
+        audio.setStreamingBeatAlignment(
+            bpm: 128,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        XCTAssertEqual(audio.targetBPM, 170)
     }
 
     func testMetronomeRequiresConfirmedBPM() {

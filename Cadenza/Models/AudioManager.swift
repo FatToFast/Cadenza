@@ -79,6 +79,7 @@ final class AudioManager: ObservableObject {
     @Published private(set) var state: PlaybackState = .idle
     @Published var targetBPM: Double = BPMRange.targetDefault {
         didSet {
+            UserDefaults.standard.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
             updateRate()
             restartMetronomeIfNeeded()
         }
@@ -103,9 +104,15 @@ final class AudioManager: ObservableObject {
         didSet { metronomeNode.volume = metronomeVolume }
     }
 
+    /// targetBPM(러닝 케이던스)를 원곡 템포에 옥타브 폴딩한 "음악의 목표 템포".
+    /// 재생 배속·메트로놈 세분화는 케이던스가 아니라 이 값을 기준으로 삼는다.
+    var musicalTargetBPM: Double {
+        BPMRange.foldedMusicalTarget(targetCadence: targetBPM, originalBPM: originalBPM)
+    }
+
     var playbackRate: Double {
         guard originalBPM > 0 else { return 1.0 }
-        let rate = targetBPM / originalBPM
+        let rate = musicalTargetBPM / originalBPM
         return min(max(rate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
     }
 
@@ -200,8 +207,16 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Init
 
+    /// 러닝 케이던스(targetBPM)는 전역·스티키·영속 값이다. 곡이 바뀌어도 유지된다.
+    static let targetCadenceDefaultsKey = "com.jy.cadenza.targetCadence"
+
     init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
         self.bpmOverrideStore = bpmOverrideStore
+        // init 내 대입은 didSet을 부르지 않으므로 초기 로드는 안전(재저장 루프 없음).
+        let storedCadence = UserDefaults.standard.double(forKey: Self.targetCadenceDefaultsKey)
+        if storedCadence >= BPMRange.targetMin, storedCadence <= BPMRange.targetMax {
+            targetBPM = storedCadence
+        }
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
@@ -439,7 +454,7 @@ final class AudioManager: ObservableObject {
                 originalBPM = bpmHint
                 _bpmFromMetadata = false
                 originalBPMSource = .metadata
-                applyAutomaticTargetBPM()
+                applyTempoPolicy()
             }
         }
     }
@@ -584,7 +599,7 @@ final class AudioManager: ObservableObject {
                 logger.info("[track_loaded] Applied user BPM override: \(storedOverride)")
             }
 
-            applyAutomaticTargetBPM()
+            applyTempoPolicy()
             state = .ready
             logger.info("[track_loaded] \(url.lastPathComponent) loaded successfully")
 
@@ -631,7 +646,7 @@ final class AudioManager: ObservableObject {
                         beatSyncStatus = .bpmOnly
                         beatSyncIssue = .missingBeatGrid
                     }
-                    applyAutomaticTargetBPM()
+                    applyTempoPolicy()
                 }
             }
         } catch {
@@ -802,13 +817,12 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Rate
 
-    private func applyAutomaticTargetBPM() {
-        let automaticTarget = BPMRange.automaticTarget(forOriginalBPM: originalBPM)
-        if targetBPM == automaticTarget {
-            updateRate()
-        } else {
-            targetBPM = automaticTarget
-        }
+    /// 새 트랙/BPM 확정 시점에 재생 배속과 메트로놈을 현재 케이던스 기준으로
+    /// 재계산한다. targetBPM(케이던스)은 스티키하므로 여기서 덮어쓰지 않고,
+    /// 원곡 템포에 옥타브 폴딩한 배속만 갱신한다.
+    private func applyTempoPolicy() {
+        updateRate()
+        restartMetronomeIfNeeded()
     }
 
     func setOriginalBPM(_ bpm: Double) {
@@ -829,7 +843,7 @@ final class AudioManager: ObservableObject {
         if let key = currentTrackOverrideKey {
             bpmOverrideStore.store(bpm: bpm, forIdentity: key)
         }
-        applyAutomaticTargetBPM()
+        applyTempoPolicy()
     }
 
     /// half/double-time 후보 중 목표 케이던스에 가까운 BPM을 임시로 적용한다.
@@ -839,12 +853,12 @@ final class AudioManager: ObservableObject {
         guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
         guard originalBPMSource != .manual else { return }
         guard abs(originalBPM - bpm) > 0.5 else {
-            applyAutomaticTargetBPM()
+            applyTempoPolicy()
             return
         }
         originalBPM = bpm
         _bpmFromMetadata = false
-        applyAutomaticTargetBPM()
+        applyTempoPolicy()
     }
 
     func setStreamingOriginalBPM(_ bpm: Double?, source: OriginalBPMSource = .metadata) {
@@ -867,7 +881,7 @@ final class AudioManager: ObservableObject {
             stopMetronomeIfBeatSyncRejected()
             sourceBeatOffsetSeconds = 0
             sourceBeatTimesSeconds = []
-            applyAutomaticTargetBPM()
+            applyTempoPolicy()
             return
         }
 
@@ -897,7 +911,7 @@ final class AudioManager: ObservableObject {
             ? sanitizedBeatTimes(beatTimesSeconds ?? [])
             : []
         errorMessage = nil
-        applyAutomaticTargetBPM()
+        applyTempoPolicy()
     }
 
     func nudgeTargetBPM(by delta: Double) {
@@ -1211,12 +1225,14 @@ final class AudioManager: ObservableObject {
     }
 
     private var metronomeSourceCadenceBPM: Double {
-        guard targetBPM > 0 else { return originalBPM }
-        return originalBPM * (metronomeBPM / targetBPM)
+        // metronomeBPM/musicalTargetBPM = 케이던스가 음악 템포 대비 몇 배로 클릭하는가.
+        // 원곡 템포를 그 배율로 환산해 비트그리드를 클릭 도메인으로 옮긴다.
+        guard musicalTargetBPM > 0 else { return originalBPM }
+        return originalBPM * (metronomeBPM / musicalTargetBPM)
     }
 
     private var metronomeBeatTimesSeconds: [TimeInterval] {
-        guard metronomeBPM > targetBPM * 1.5 else { return sourceBeatTimesSeconds }
+        guard metronomeBPM > musicalTargetBPM * 1.5 else { return sourceBeatTimesSeconds }
         return doubledBeatTimes(sourceBeatTimesSeconds)
     }
 

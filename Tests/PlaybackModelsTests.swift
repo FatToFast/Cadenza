@@ -272,6 +272,36 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 128), 180)
     }
 
+    // MARK: - 옥타브 폴딩 (스티키 케이던스 → 음악 목표 템포)
+
+    func testFoldedMusicalTargetKeepsPlaybackRateNearOne() {
+        // 원곡 85 + 케이던스 170 → 목표 85, 배속 1.0 (한 박에 두 걸음)
+        let mt1 = BPMRange.foldedMusicalTarget(targetCadence: 170, originalBPM: 85)
+        XCTAssertEqual(mt1, 85, accuracy: 0.0001)
+        XCTAssertEqual(mt1 / 85, 1.0, accuracy: 0.0001)
+
+        // 원곡 85 + 케이던스 180 → 목표 90, 배속 ≈ 1.0588
+        let mt2 = BPMRange.foldedMusicalTarget(targetCadence: 180, originalBPM: 85)
+        XCTAssertEqual(mt2, 90, accuracy: 0.0001)
+        XCTAssertEqual(mt2 / 85, 1.0588, accuracy: 0.0001)
+
+        // 원곡 175 + 케이던스 175 → 목표 175, 배속 1.0
+        let mt3 = BPMRange.foldedMusicalTarget(targetCadence: 175, originalBPM: 175)
+        XCTAssertEqual(mt3, 175, accuracy: 0.0001)
+        XCTAssertEqual(mt3 / 175, 1.0, accuracy: 0.0001)
+
+        // 원곡 60 + 케이던스 220 → 목표 55, 배속 ≈ 0.9167 (내려서 1.0에 근접)
+        let mt4 = BPMRange.foldedMusicalTarget(targetCadence: 220, originalBPM: 60)
+        XCTAssertEqual(mt4, 55, accuracy: 0.0001)
+        XCTAssertEqual(mt4 / 60, 0.9167, accuracy: 0.0001)
+    }
+
+    func testFoldedMusicalTargetReturnsCadenceWhenOriginalBPMNonPositive() {
+        // originalBPM <= 0이면 폴딩 근거가 없어 케이던스를 그대로 반환 (배속 가드는 별도 유지).
+        XCTAssertEqual(BPMRange.foldedMusicalTarget(targetCadence: 175, originalBPM: 0), 175)
+        XCTAssertEqual(BPMRange.foldedMusicalTarget(targetCadence: 175, originalBPM: -10), 175)
+    }
+
     func testMetronomeCadenceUsesDoubleTimeForNinetyTarget() {
         XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 90), 180)
         XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 95), 190)
