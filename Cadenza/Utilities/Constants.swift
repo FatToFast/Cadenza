@@ -4,18 +4,104 @@ import UIKit
 // MARK: - BPM Ranges
 
 enum BPMRange {
-    static let targetMin: Double = 90
-    static let targetMax: Double = 220
+    static let targetMin: Double = 140
+    static let targetMax: Double = 200
     static let targetDefault: Double = 180
+    static let cadenceAllowance: Double = 10
+    static let maximumQualityRate: Double = 1.25
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
     static let rateMin: Float = 0.5
     static let rateMax: Float = 2.5
-    static let doubleTimeThreshold: Double = 100
 
-    static func automaticTarget(forOriginalBPM originalBPM: Double) -> Double {
-        originalBPM < doubleTimeThreshold ? 90 : 180
+    enum TempoMode: Equatable, Sendable {
+        case originalSpeed
+        case adjustedSpeed
+        case rejected
+    }
+
+    enum TempoRejectionReason: Equatable, Sendable {
+        case invalidOriginalBPM
+        case slowingRequired
+        case rateAboveMaximum
+    }
+
+    struct TempoPlan: Equatable, Sendable {
+        let baseCadence: Double
+        let allowedCadence: ClosedRange<Double>
+        let musicalTarget: Double
+        let effectiveCadence: Double
+        let requiredPlaybackRate: Double
+        let mode: TempoMode
+        let rejectionReason: TempoRejectionReason?
+
+        var isPlayable: Bool { rejectionReason == nil }
+        var playbackRate: Double { isPlayable ? requiredPlaybackRate : 1.0 }
+    }
+
+    static func tempoPlan(targetCadence: Double, originalBPM: Double) -> TempoPlan {
+        let normalizedTarget = targetCadence.isNaN ? targetDefault : targetCadence
+        let base = min(max(normalizedTarget, targetMin), targetMax)
+        let allowed = base...min(base + cadenceAllowance, targetMax)
+
+        guard originalBPM.isFinite, originalBPM > 0 else {
+            return rejectedPlan(
+                base: base,
+                allowed: allowed,
+                musicalTarget: base,
+                requiredPlaybackRate: 0,
+                reason: .invalidOriginalBPM
+            )
+        }
+
+        let originalSpeedCadences = [1.0, 2.0, 4.0].map { originalBPM * $0 }
+        if let effectiveCadence = originalSpeedCadences.first(where: allowed.contains) {
+            return TempoPlan(
+                baseCadence: base,
+                allowedCadence: allowed,
+                musicalTarget: originalBPM,
+                effectiveCadence: effectiveCadence,
+                requiredPlaybackRate: 1.0,
+                mode: .originalSpeed,
+                rejectionReason: nil
+            )
+        }
+
+        let musicalTarget = foldedMusicalTarget(
+            targetCadence: base,
+            originalBPM: originalBPM
+        )
+        let requiredPlaybackRate = musicalTarget / originalBPM
+
+        guard requiredPlaybackRate >= 1.0 else {
+            return rejectedPlan(
+                base: base,
+                allowed: allowed,
+                musicalTarget: musicalTarget,
+                requiredPlaybackRate: requiredPlaybackRate,
+                reason: .slowingRequired
+            )
+        }
+        guard requiredPlaybackRate <= maximumQualityRate else {
+            return rejectedPlan(
+                base: base,
+                allowed: allowed,
+                musicalTarget: musicalTarget,
+                requiredPlaybackRate: requiredPlaybackRate,
+                reason: .rateAboveMaximum
+            )
+        }
+
+        return TempoPlan(
+            baseCadence: base,
+            allowedCadence: allowed,
+            musicalTarget: musicalTarget,
+            effectiveCadence: base,
+            requiredPlaybackRate: requiredPlaybackRate,
+            mode: .adjustedSpeed,
+            rejectionReason: nil
+        )
     }
 
     /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 배속이 1.0 이상이면서 가장 1.0에
@@ -51,8 +137,25 @@ enum BPMRange {
     }
 
     static func metronomeCadence(forTargetBPM targetBPM: Double) -> Double {
-        let cadence = targetBPM < doubleTimeThreshold ? targetBPM * 2 : targetBPM
-        return min(max(cadence, targetMin), targetMax)
+        min(max(targetBPM, targetMin), targetMax)
+    }
+
+    private static func rejectedPlan(
+        base: Double,
+        allowed: ClosedRange<Double>,
+        musicalTarget: Double,
+        requiredPlaybackRate: Double,
+        reason: TempoRejectionReason
+    ) -> TempoPlan {
+        TempoPlan(
+            baseCadence: base,
+            allowedCadence: allowed,
+            musicalTarget: musicalTarget,
+            effectiveCadence: base,
+            requiredPlaybackRate: requiredPlaybackRate,
+            mode: .rejected,
+            rejectionReason: reason
+        )
     }
 }
 
