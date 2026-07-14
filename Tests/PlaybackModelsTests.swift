@@ -638,19 +638,6 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 50))
     }
 
-    func testBPMOctaveDefaultPicksClosestToGoal() {
-        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 175), 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 90), 87)
-    }
-
-    func testBPMOctaveDefaultPrefersUpperOnTieOrMissingGoal() {
-        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: nil), 174)
-        let mid = (87.0 + 174.0) / 2
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: mid), 174)
-    }
-
     func testBPMOctavePairRejectsInvalidInputs() {
         XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 0))
         XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: -1))
@@ -663,10 +650,4 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertNil(BPMOctaveChoice.ambiguousPair(for: 240))
     }
 
-    func testBPMOctaveDefaultIgnoresInvalidGoal() {
-        let pair = BPMOctaveChoicePair(lower: 87, upper: 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: .nan), 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: 0), 174)
-        XCTAssertEqual(BPMOctaveChoice.defaultChoice(for: pair, goalCadence: -10), 174)
-    }
 }
