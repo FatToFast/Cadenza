@@ -107,6 +107,8 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var canRepeat = false
     @Published private(set) var isRepeatEnabled = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var currentQueueIdentity: String?
+    private(set) var isPlaylistQueueContext = false
 
     private let player = ApplicationMusicPlayer.shared
     private var queueCancellable: AnyCancellable?
@@ -159,7 +161,9 @@ final class AppleMusicStreamingController: ObservableObject {
         await prepareBPMCacheIfPossible()
 
         do {
+            isPlaylistQueueContext = false
             currentSong = song
+            currentQueueIdentity = storeKey(song.id.rawValue)
             currentTitle = song.title
             currentArtist = song.artistName
             currentArtworkURL = song.artwork?.url(width: 600, height: 600)
@@ -206,7 +210,9 @@ final class AppleMusicStreamingController: ObservableObject {
         startPlaylistBPMPreload(preloadedEntries)
 
         do {
+            isPlaylistQueueContext = true
             currentSong = nil
+            currentQueueIdentity = queueIdentity(for: entry)
             currentTitle = entry.title
             currentArtist = entry.artistName
             currentArtworkURL = entry.artwork?.url(width: 600, height: 600)
@@ -304,7 +310,8 @@ final class AppleMusicStreamingController: ObservableObject {
                         artist: entry.artistName,
                         albumTitle: entry.albumTitle
                     )
-                    if self.currentTitle == entry.title && self.currentArtist == entry.artistName {
+                    let entryIdentity = self.queueIdentity(for: entry)
+                    if self.currentQueueIdentity == entryIdentity {
                         self.applyResolvedBPM(bpmResult)
                     }
                     self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
@@ -350,12 +357,13 @@ final class AppleMusicStreamingController: ObservableObject {
         }
     }
 
-    func skipToNext(playbackRate: Double) async {
+    @discardableResult
+    func skipToNext(playbackRate: Double) async -> Bool {
         await skip(direction: .next, playbackRate: playbackRate)
     }
 
     func skipToPrevious(playbackRate: Double) async {
-        await skip(direction: .previous, playbackRate: playbackRate)
+        _ = await skip(direction: .previous, playbackRate: playbackRate)
     }
 
     func toggleShuffle() {
@@ -375,6 +383,7 @@ final class AppleMusicStreamingController: ObservableObject {
         nowPlayingTask?.cancel()
         nowPlayingTask = nil
         currentSong = nil
+        currentQueueIdentity = nil
         currentTitle = nil
         currentArtist = nil
         currentArtworkURL = nil
@@ -394,6 +403,13 @@ final class AppleMusicStreamingController: ObservableObject {
         setRepeatEnabled(false)
         isPlaying = false
         isLoading = false
+        isPlaylistQueueContext = false
+    }
+
+    func pause() {
+        guard isPlaying || player.state.playbackStatus == .playing else { return }
+        player.pause()
+        isPlaying = false
     }
 
     func applyPlaybackRate(_ playbackRate: Double) {
@@ -453,8 +469,8 @@ final class AppleMusicStreamingController: ObservableObject {
         case previous
     }
 
-    private func skip(direction: SkipDirection, playbackRate: Double) async {
-        guard currentTitle != nil else { return }
+    private func skip(direction: SkipDirection, playbackRate: Double) async -> Bool {
+        guard currentTitle != nil else { return false }
 
         do {
             switch direction {
@@ -468,10 +484,12 @@ final class AppleMusicStreamingController: ObservableObject {
             syncCurrentEntryFromQueue()
             applyPlaybackRate(playbackRate)
             reapplyPlaybackRateAfterStartup()
+            return true
         } catch {
             errorMessage = direction == .next
                 ? "다음 곡으로 넘어갈 수 없습니다"
                 : "이전 곡으로 돌아갈 수 없습니다"
+            return false
         }
     }
 
@@ -509,6 +527,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func syncCurrentEntryFromQueue() {
         guard let entry = player.queue.currentEntry else { return }
+        currentQueueIdentity = queueIdentity(for: entry)
         currentTitle = entry.title
         currentArtist = artistName(for: entry) ?? entry.subtitle
         currentArtworkURL = artworkURL(for: entry)
@@ -827,7 +846,7 @@ final class AppleMusicStreamingController: ObservableObject {
                 isrc: isrc
             )
 
-            if self.currentTitle == title && (artist == nil || self.currentArtist == artist) {
+            if self.currentQueueIdentity == identityKey {
                 self.applyResolvedBPM(result)
             }
             self.logger.info("[bpm_resolver] success bpm=\(result.bpm) source=\(result.source.badgeText, privacy: .public) title=\(title, privacy: .public)")
@@ -903,6 +922,27 @@ final class AppleMusicStreamingController: ObservableObject {
             artist: currentArtist,
             albumTitle: nil
         )
+    }
+
+    private func queueIdentity(for entry: MusicKit.MusicPlayer.Queue.Entry) -> String? {
+        if case .song(let song)? = entry.item {
+            return storeKey(song.id.rawValue)
+        }
+        if let song = entry.transientItem as? Song {
+            return storeKey(song.id.rawValue)
+        }
+        let entryID = entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entryID.isEmpty else { return nil }
+        return storeKey(entryID)
+    }
+
+    private func queueIdentity(for entry: Playlist.Entry) -> String? {
+        if case .song(let song)? = entry.item {
+            return storeKey(song.id.rawValue)
+        }
+        let entryID = entry.id.rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entryID.isEmpty else { return nil }
+        return storeKey(entryID)
     }
 
     private func reapplyPlaybackRateAfterStartup() {

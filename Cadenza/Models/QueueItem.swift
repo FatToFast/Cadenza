@@ -101,6 +101,41 @@ struct LocalFilePlaylist: Sendable, Equatable {
         return currentItem
     }
 
+    mutating func markCurrentUnplayable(_ reason: QueueItem.UnplayableReason) {
+        guard let currentItem else { return }
+        updateItem(id: currentItem.id) { $0.unplayableReason = reason }
+    }
+
+    /// Advances strictly forward to the next queue item without a recorded failure.
+    /// It never wraps, so a rejected item cannot create an automatic skip cycle.
+    mutating func moveToNextPlayable() -> QueueItem? {
+        guard let currentIndex else { return nil }
+        var candidateIndex = currentIndex + 1
+        var examinedCount = 0
+
+        while items.indices.contains(candidateIndex), examinedCount < items.count {
+            examinedCount += 1
+            if items[candidateIndex].unplayableReason == nil {
+                self.currentIndex = candidateIndex
+                return items[candidateIndex]
+            }
+            candidateIndex += 1
+        }
+        return nil
+    }
+
+    mutating func clearTempoUnplayableReasons() {
+        let tempoRejectedIDs = Set(items.compactMap { item -> String? in
+            guard case .rateOutOfRange = item.unplayableReason else { return nil }
+            return item.id
+        })
+        guard !tempoRejectedIDs.isEmpty else { return }
+
+        for id in tempoRejectedIDs {
+            updateItem(id: id) { $0.unplayableReason = nil }
+        }
+    }
+
     mutating func moveToPrevious() -> QueueItem? {
         guard canMovePrevious, let currentIndex else { return nil }
         self.currentIndex = currentIndex - 1
@@ -137,6 +172,30 @@ struct LocalFilePlaylist: Sendable, Equatable {
             items.firstIndex { $0.id == id }
         } ?? (items.isEmpty ? nil : 0)
         isShuffled = false
+    }
+
+    private mutating func updateItem(id: String, update: (inout QueueItem) -> Void) {
+        if let index = items.firstIndex(where: { $0.id == id }) {
+            update(&items[index])
+        }
+        if let index = originalItems.firstIndex(where: { $0.id == id }) {
+            update(&originalItems[index])
+        }
+    }
+}
+
+struct TempoSkipGuard: Sendable, Equatable {
+    private var visitedIdentities: Set<String> = []
+
+    mutating func register(identity: String?) -> Bool {
+        guard let identity else { return false }
+        let normalized = identity.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        return visitedIdentities.insert(normalized).inserted
+    }
+
+    mutating func reset() {
+        visitedIdentities.removeAll(keepingCapacity: true)
     }
 }
 

@@ -19,6 +19,10 @@ struct PlayerView: View {
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
     @State private var isSeekingPlayback = false
+    @State private var streamingTempoSkipGuard = TempoSkipGuard()
+    @State private var streamingSkipInFlightIdentity: String?
+    @State private var streamingTempoPolicyGeneration = 0
+    @State private var streamingSkipTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -163,6 +167,10 @@ struct PlayerView: View {
                 syncStreamingMetronome()
             }
         }
+        .onChange(of: audio.targetBPM) { _, _ in
+            resetStreamingTempoSkipCycle()
+            applyStreamingTempoAndAlignment()
+        }
         .onChange(of: audio.metronomeEnabled) { _, _ in
             syncStreamingMetronome()
         }
@@ -174,8 +182,11 @@ struct PlayerView: View {
                 audio.presentError(message)
             }
         }
-        .onChange(of: streaming.currentBPM) { _, bpm in
-            applyStreamingTempoAndAlignment(bpm: bpm)
+        .onChange(of: streaming.currentQueueIdentity) { _, _ in
+            applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: streaming.currentBPM) { _, _ in
+            applyStreamingTempoAndAlignment()
         }
         .onChange(of: streaming.currentBPMSource) { _, _ in
             applyStreamingTempoAndAlignment()
@@ -859,10 +870,12 @@ struct PlayerView: View {
             return false
         }
         if streaming.hasSong {
-            return true
+            return streaming.currentBPM == nil || audio.isCurrentTempoPlayable
         }
         switch audio.state {
-        case .ready, .paused, .playing:
+        case .ready, .paused:
+            return audio.canStartPlayback
+        case .playing:
             return true
         case .idle:
             return audio.canStartPlayback
@@ -960,6 +973,7 @@ struct PlayerView: View {
 
     private func playAppleMusicStream(_ song: Song) {
         audio.clearError()
+        resetStreamingTempoSkipCycle()
         audio.clearLocalPlaylist()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
@@ -973,6 +987,7 @@ struct PlayerView: View {
 
     private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry, entries: [Playlist.Entry]) {
         audio.clearError()
+        resetStreamingTempoSkipCycle()
         audio.clearLocalPlaylist()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
@@ -991,6 +1006,7 @@ struct PlayerView: View {
 
     private func handlePrimaryPlayback() {
         if streaming.hasSong {
+            guard streaming.currentBPM == nil || audio.isCurrentTempoPlayable else { return }
             Task {
                 await streaming.togglePlayback(playbackRate: audio.playbackRate)
                 syncStreamingMetronome()
@@ -1001,16 +1017,16 @@ struct PlayerView: View {
     }
 
     private func handleStreamingNext() {
+        resetStreamingTempoSkipCycle()
         Task {
-            await streaming.skipToNext(playbackRate: 1.0)
-            applyStreamingTempoAndAlignment()
+            _ = await streaming.skipToNext(playbackRate: 1.0)
         }
     }
 
     private func handleStreamingPrevious() {
+        resetStreamingTempoSkipCycle()
         Task {
             await streaming.skipToPrevious(playbackRate: 1.0)
-            applyStreamingTempoAndAlignment()
         }
     }
 
@@ -1054,17 +1070,95 @@ struct PlayerView: View {
         audio.startExternalMetronomePlayback(alignedToSourceTime: streaming.playbackTime)
     }
 
-    private func applyStreamingTempoAndAlignment(bpm: Double? = nil) {
+    private func applyStreamingTempoAndAlignment() {
         guard streaming.hasSong else { return }
+        let identity = streaming.currentQueueIdentity
+        let bpm = streaming.currentBPM
         audio.setStreamingBeatAlignment(
-            bpm: bpm ?? streaming.currentBPM,
+            bpm: bpm,
             source: streaming.currentBPMSource ?? .metadata,
             beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
             beatTimesSeconds: streaming.currentBeatTimesSeconds,
             confidence: streaming.currentBeatAlignmentConfidence
         )
-        streaming.applyPlaybackRate(audio.playbackRate)
-        syncStreamingMetronome()
+        guard bpm != nil, streaming.currentBPMSource != nil else {
+            streaming.applyPlaybackRate(1.0)
+            syncStreamingMetronome()
+            return
+        }
+
+        guard !audio.tempoPlan.isPlayable else {
+            resetStreamingTempoSkipCycle()
+            streaming.applyPlaybackRate(audio.playbackRate)
+            syncStreamingMetronome()
+            return
+        }
+
+        streaming.applyPlaybackRate(1.0)
+        audio.stopExternalMetronomePlayback()
+
+        guard streaming.isPlaylistQueueContext else {
+            streaming.pause()
+            audio.presentError("케이던스 범위에 맞지 않는 곡입니다")
+            return
+        }
+
+        if streamingSkipInFlightIdentity == identity {
+            return
+        }
+        if streamingSkipInFlightIdentity != nil {
+            streamingSkipInFlightIdentity = nil
+        }
+        guard streamingTempoSkipGuard.register(identity: identity) else {
+            finishStreamingTempoSkipCycle()
+            return
+        }
+
+        streamingSkipInFlightIdentity = identity
+        let generation = streamingTempoPolicyGeneration
+        streamingSkipTask = Task {
+            let didSkip = await streaming.skipToNext(playbackRate: 1.0)
+            guard !Task.isCancelled else { return }
+            guard generation == streamingTempoPolicyGeneration else { return }
+            guard didSkip else {
+                streamingSkipTask = nil
+                streaming.clearError()
+                finishStreamingTempoSkipCycle()
+                return
+            }
+
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            guard generation == streamingTempoPolicyGeneration else { return }
+            streamingSkipTask = nil
+            if streaming.currentQueueIdentity == identity {
+                finishStreamingTempoSkipCycle()
+            } else if streamingSkipInFlightIdentity == identity {
+                streamingSkipInFlightIdentity = nil
+            }
+        }
+    }
+
+    private func resetStreamingTempoSkipCycle() {
+        streamingSkipTask?.cancel()
+        streamingSkipTask = nil
+        streamingTempoSkipGuard.reset()
+        streamingSkipInFlightIdentity = nil
+        streamingTempoPolicyGeneration &+= 1
+        if audio.errorMessage == "케이던스 범위에 맞는 곡이 없습니다"
+            || audio.errorMessage == "케이던스 범위에 맞지 않는 곡입니다" {
+            audio.clearError()
+        }
+    }
+
+    private func finishStreamingTempoSkipCycle() {
+        streaming.pause()
+        streaming.applyPlaybackRate(1.0)
+        audio.stopExternalMetronomePlayback()
+        streamingSkipTask = nil
+        streamingSkipInFlightIdentity = nil
+        streamingTempoPolicyGeneration &+= 1
+        audio.presentError("케이던스 범위에 맞는 곡이 없습니다")
     }
 
     private var primaryPlaybackIcon: String {
@@ -1105,7 +1199,7 @@ struct PlayerView: View {
 
         if streaming.hasSong {
             guard streaming.setManualBPM(bpm) else { return }
-            applyStreamingTempoAndAlignment(bpm: bpm)
+            applyStreamingTempoAndAlignment()
         } else {
             audio.setOriginalBPM(bpm)
         }

@@ -188,6 +188,121 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.state, .ready)
     }
 
+    func testConfirmedRejectedPlaylistTrackMarksCurrentAndAdvances() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+        ])
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: true
+        )
+
+        XCTAssertEqual(action, .advance(playlist.currentItem!))
+        XCTAssertEqual(playlist.currentItem?.title, "b")
+        XCTAssertEqual(
+            playlist.items.first(where: { $0.title == "a" })?.unplayableReason,
+            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
+        )
+    }
+
+    func testUnconfirmedPlaylistTrackDoesNotMarkOrAdvance() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+        ])
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: true
+        )
+
+        XCTAssertEqual(action, .keepCurrent)
+        XCTAssertEqual(playlist.currentItem?.title, "a")
+        XCTAssertNil(playlist.currentItem?.unplayableReason)
+    }
+
+    func testRejectedPlaylistWithNoPlayableItemReportsExhausted() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        var playlist = LocalFilePlaylist(items: [
+            QueueItem(
+                id: "a", title: "a", artist: nil,
+                source: .file(URL(fileURLWithPath: "/tmp/a.mp3"))
+            ),
+            QueueItem(
+                id: "b", title: "b", artist: nil,
+                source: .file(URL(fileURLWithPath: "/tmp/b.mp3")),
+                unplayableReason: .rateOutOfRange(required: 1.7)
+            ),
+        ])
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: true
+        )
+
+        XCTAssertEqual(action, .exhausted)
+        XCTAssertEqual(
+            playlist.currentItem?.unplayableReason,
+            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
+        )
+    }
+
+    func testRejectedDirectTrackNeverAdvancesQueue() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/a.mp3"),
+            URL(fileURLWithPath: "/tmp/b.mp3"),
+        ])
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: false
+        )
+
+        XCTAssertEqual(action, .keepCurrent)
+        XCTAssertEqual(playlist.currentItem?.title, "a")
+        XCTAssertNil(playlist.currentItem?.unplayableReason)
+        XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
+    }
+
+    func testStreamingControllerStartsOutsidePlaylistContextWithoutIdentity() {
+        let streaming = AppleMusicStreamingController()
+
+        XCTAssertFalse(streaming.isPlaylistQueueContext)
+        XCTAssertNil(streaming.currentQueueIdentity)
+    }
+
+    func testStreamingNextReportsFailureWhenThereIsNoCurrentQueueEntry() async {
+        let streaming = AppleMusicStreamingController()
+
+        let didSkip = await streaming.skipToNext(playbackRate: 1.0)
+
+        XCTAssertFalse(didSkip)
+    }
+
     /// 스티키 케이던스: streaming BPM 해석이 도착해도 사용자의 케이던스는 유지된다.
     func testStreamingBeatAlignmentDoesNotOverwriteStickyCadence() {
         let audio = AudioManager()
