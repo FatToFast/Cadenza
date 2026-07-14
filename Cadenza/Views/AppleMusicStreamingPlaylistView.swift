@@ -3,14 +3,14 @@ import SwiftUI
 
 @MainActor
 struct AppleMusicStreamingPlaylistView: View {
+    @Binding var targetCadence: Double
     let onEntryPicked: (Playlist, Playlist.Entry, [Playlist.Entry]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var playlists: [Playlist] = []
     @State private var entriesByPlaylist: [MusicItemID: [Playlist.Entry]] = [:]
-    @State private var bpmByEntryID: [String: Int] = [:]
-    @State private var cadenceFitsByEntryID: [String: RunningCadenceFit] = [:]
+    @State private var bpmByEntryID: [String: Double] = [:]
     @State private var bpmLookupAttemptedEntryIDs: Set<String> = []
     @State private var hiddenEntryIDs: Set<MusicItemID> = []
     @State private var isLoading = false
@@ -202,7 +202,7 @@ struct AppleMusicStreamingPlaylistView: View {
         let entryID = entry.id.rawValue
         VStack(alignment: .trailing, spacing: 3) {
             if let bpm = bpmByEntryID[entryID] {
-                Text("\(bpm) BPM")
+                Text("\(Int(bpm.rounded())) BPM")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaAccent)
                     .lineLimit(1)
@@ -218,7 +218,11 @@ struct AppleMusicStreamingPlaylistView: View {
                     .lineLimit(1)
             }
 
-            if let fit = cadenceFitsByEntryID[entryID], fit.originalBPM != nil {
+            if let bpm = bpmByEntryID[entryID] {
+                let fit = RunningCadenceFit.evaluate(
+                    originalBPM: bpm,
+                    targetCadence: targetCadence
+                )
                 Text(fit.detailText)
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -295,8 +299,7 @@ struct AppleMusicStreamingPlaylistView: View {
     }
 
     private func applyBPM(_ bpm: Double, for lookup: PlaylistEntryBPMLookup) {
-        bpmByEntryID[lookup.entryID] = Int(bpm.rounded())
-        cadenceFitsByEntryID[lookup.entryID] = RunningCadenceFit.evaluate(originalBPM: bpm)
+        bpmByEntryID[lookup.entryID] = bpm
     }
 
     private func bpmLookup(for entry: Playlist.Entry) -> PlaylistEntryBPMLookup {

@@ -42,9 +42,8 @@ struct PlayerView: View {
 
                         // BPM 디스플레이
                         BPMDisplayView(
-                            targetBPM: audio.targetBPM,
+                            tempoPlan: audio.tempoPlan,
                             originalBPM: nowPlaying.originalBPM,
-                            playbackRate: audio.playbackRate,
                             originalBPMSource: nowPlaying.originalBPMSource,
                             cadenceFit: currentCadenceFit
                         )
@@ -53,7 +52,6 @@ struct PlayerView: View {
                         // BPM 슬라이더
                         BPMSliderView(
                             targetBPM: $audio.targetBPM,
-                            playbackRate: audio.playbackRate,
                             onDecrease: { audio.nudgeTargetBPM(by: -5) },
                             onReset: { audio.resetTargetBPM() },
                             onIncrease: { audio.nudgeTargetBPM(by: 5) }
@@ -143,7 +141,7 @@ struct PlayerView: View {
             }
         }
         .sheet(isPresented: $showAppleMusicStreamingPlaylists) {
-            AppleMusicStreamingPlaylistView { playlist, entry, entries in
+            AppleMusicStreamingPlaylistView(targetCadence: $audio.targetBPM) { playlist, entry, entries in
                 playAppleMusicPlaylist(playlist, entry: entry, entries: entries)
             }
         }
@@ -240,8 +238,6 @@ struct PlayerView: View {
                     .frame(width: 220, height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                playbackControls
-
                 Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaWarning)
@@ -270,8 +266,6 @@ struct PlayerView: View {
                 trackArtworkOrCadence
                     .frame(width: 220, height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                playbackControls
 
                 // 상태 배지
                 Label("키 락 ON", systemImage: "music.note")
@@ -322,7 +316,6 @@ struct PlayerView: View {
                     .foregroundColor(.cadenzaTextSecondary)
                     .multilineTextAlignment(.center)
 
-                playbackControls
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
@@ -342,7 +335,6 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
 
-                playbackControls
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
@@ -450,7 +442,7 @@ struct PlayerView: View {
     private var originalBPMControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("원본 BPM")
+                Text("원곡 BPM")
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextPrimary)
                 Spacer()
@@ -604,7 +596,9 @@ struct PlayerView: View {
                 .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .accessibilityLabel("\(label) 선택")
+        .accessibilityLabel(label)
+        .accessibilityValue(isActive ? "선택됨" : "선택 안 됨")
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private func confirmBPMChoice(_ bpm: Double) {
@@ -1220,7 +1214,7 @@ struct PlayerView: View {
 
     private func applyOriginalBPM() {
         guard let bpm = Double(originalBPMText) else {
-            audio.presentError("원본 BPM은 30~300 사이 숫자로 입력하세요")
+            audio.presentError("원곡 BPM은 30~300 사이 숫자로 입력하세요")
             return
         }
 
