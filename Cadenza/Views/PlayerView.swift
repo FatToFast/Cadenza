@@ -189,12 +189,6 @@ struct PlayerView: View {
         .onChange(of: streaming.currentBeatSyncStatus) { _, _ in
             applyStreamingTempoAndAlignment()
         }
-        .onChange(of: audio.originalBPM) { _, _ in
-            applyAutoBPMDefaultIfNeeded()
-        }
-        .onChange(of: audio.originalBPMSource) { _, _ in
-            applyAutoBPMDefaultIfNeeded()
-        }
         .onReceive(audio.trackEndedSubject) { _ in
             handleLocalPlaylistTrackEnded()
         }
@@ -569,54 +563,39 @@ struct PlayerView: View {
     }
 
     private func bpmChoiceSection(pair: BPMOctaveChoicePair) -> some View {
-        let goal = audio.targetBPM
-        let defaultChoice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: goal)
         let activeBPM = nowPlaying.originalBPM.rounded()
 
         return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("BPM 확인")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaTextPrimary)
-                Spacer()
-                Text("자동 선택됨")
-                    .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaTextTertiary)
-            }
+            Text("BPM 확인")
+                .font(.cadenzaBody)
+                .foregroundColor(.cadenzaTextPrimary)
 
             HStack(spacing: 10) {
-                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM, defaultBPM: defaultChoice)
-                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM, defaultBPM: defaultChoice)
+                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM)
+                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM)
             }
 
-            Text("목표 \(Int(goal.rounded())) BPM에 가까운 \(Int(defaultChoice)) BPM을 적용했습니다. 다른 값을 누르면 변경됩니다.")
+            Text("감지된 원곡 BPM을 유지합니다. 박자가 두 배 또는 절반으로 잡혔다면 다른 값을 선택하세요.")
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
         }
     }
 
-    private func bpmChoiceButton(bpm: Double, activeBPM: Double, defaultBPM: Double) -> some View {
+    private func bpmChoiceButton(bpm: Double, activeBPM: Double) -> some View {
         let isActive = abs(activeBPM - bpm) < 0.5
         let label = "\(Int(bpm)) BPM"
         return Button {
             confirmBPMChoice(bpm)
         } label: {
-            VStack(spacing: 4) {
-                Text(label)
-                    .font(.cadenzaBody)
-                if abs(bpm - defaultBPM) < 0.5 {
-                    Text("목표에 가까움")
-                        .font(.cadenzaCaption)
-                        .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextTertiary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
-            .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Text(label)
+                .font(.cadenzaBody)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
+                .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .accessibilityLabel("\(label) 적용")
+        .accessibilityLabel("\(label) 선택")
     }
 
     private func confirmBPMChoice(_ bpm: Double) {
@@ -631,19 +610,6 @@ struct PlayerView: View {
             audio.setOriginalBPM(bpm)
         }
         originalBPMText = "\(Int(bpm))"
-    }
-
-    private func applyAutoBPMDefaultIfNeeded() {
-        guard let pair = ambiguousBPMOctaveChoicePair else { return }
-        let choice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: audio.targetBPM)
-        if streaming.hasSong {
-            // Streaming controller already published a BPM; only adjust if it's the
-            // wrong octave. Avoid touching streaming's source-of-truth except via
-            // the audio manager's lighter auto-default path.
-            audio.applyAutoBPMDefault(choice)
-        } else {
-            audio.applyAutoBPMDefault(choice)
-        }
     }
 
     private var beatSyncStatusSection: some View {

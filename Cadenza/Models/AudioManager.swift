@@ -866,21 +866,6 @@ final class AudioManager: ObservableObject {
         applyTempoPolicy()
     }
 
-    /// half/double-time 후보 중 목표 케이던스에 가까운 BPM을 임시로 적용한다.
-    /// 사용자가 명시적으로 선택한 것이 아니므로 영구 저장하지 않고
-    /// `originalBPMSource`도 바꾸지 않아 UI에 후보 버튼이 계속 보인다.
-    func applyAutoBPMDefault(_ bpm: Double) {
-        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
-        guard originalBPMSource != .manual else { return }
-        guard abs(originalBPM - bpm) > 0.5 else {
-            applyTempoPolicy()
-            return
-        }
-        originalBPM = bpm
-        _bpmFromMetadata = false
-        applyTempoPolicy()
-    }
-
     func setStreamingOriginalBPM(_ bpm: Double?, source: OriginalBPMSource = .metadata) {
         setStreamingBeatAlignment(bpm: bpm, source: source, beatOffsetSeconds: nil)
     }

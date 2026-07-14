@@ -1,9 +1,38 @@
 import XCTest
 import Combine
+import SwiftUI
+import UIKit
 @testable import Cadenza
 
 @MainActor
 final class AudioManagerGenerationTests: XCTestCase {
+    func testPlayerViewDoesNotSnapDetectedOriginalBPMToCadenceOctave() async {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        let host = UIHostingController(rootView: PlayerView().environmentObject(audio))
+        host.loadViewIfNeeded()
+        host.beginAppearanceTransition(true, animated: false)
+        host.endAppearanceTransition()
+        host.view.layoutIfNeeded()
+        await Task.yield()
+        await Task.yield()
+
+        audio.setStreamingBeatAlignment(
+            bpm: 87,
+            source: .analysis,
+            beatOffsetSeconds: nil
+        )
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(audio.originalBPM, 87)
+        XCTAssertEqual(audio.originalBPMSource, .analysis)
+
+        host.beginAppearanceTransition(false, animated: false)
+        host.endAppearanceTransition()
+        await Task.yield()
+    }
+
     func testDefaultBehaviorIsLoop() {
         XCTAssertEqual(AudioManager().playbackEndBehavior, .loop)
     }
@@ -99,10 +128,8 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
 
-        audio.applyAutoBPMDefault(144)
-
         XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
-        XCTAssertEqual(audio.tempoPlan.requiredPlaybackRate, 1.25, accuracy: 0.0001)
+        XCTAssertGreaterThan(audio.tempoPlan.requiredPlaybackRate, 1.25)
         XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
         XCTAssertNil(audio.tempoRejectionMessage)
