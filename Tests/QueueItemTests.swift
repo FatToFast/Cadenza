@@ -263,6 +263,35 @@ final class QueueItemTests: XCTestCase {
 
         XCTAssertFalse(coordinator.permitsSkip(token: token, currentIdentity: "song-a"))
     }
+
+    func testStreamingTempoPolicyGateDefersWhileInitialSelectionIsLoading() {
+        XCTAssertFalse(
+            StreamingTempoPolicyGate.shouldEvaluate(hasSong: true, isLoading: true)
+        )
+        XCTAssertTrue(
+            StreamingTempoPolicyGate.shouldEvaluate(hasSong: true, isLoading: false)
+        )
+        XCTAssertFalse(
+            StreamingTempoPolicyGate.shouldEvaluate(hasSong: false, isLoading: false)
+        )
+    }
+
+    func testStreamingQueueCommandSnapshotRejectsSelectionGenerationChange() {
+        let snapshot = StreamingQueueCommandSnapshot(
+            selectionGeneration: 7,
+            expectedIdentity: " song-a "
+        )
+
+        XCTAssertTrue(
+            snapshot.isCurrent(selectionGeneration: 7, currentIdentity: "song-a")
+        )
+        XCTAssertFalse(
+            snapshot.isCurrent(selectionGeneration: 8, currentIdentity: "song-b")
+        )
+        XCTAssertFalse(
+            snapshot.isCurrent(selectionGeneration: 7, currentIdentity: "song-b")
+        )
+    }
 }
 
 private struct FixedRandomNumberGenerator: RandomNumberGenerator {

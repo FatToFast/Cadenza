@@ -392,6 +392,79 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertNil(context.identity)
     }
 
+    func testStreamingQueueMutationGateSerializesSkipBeforeNewQueueSetup() async {
+        let gate = StreamingQueueMutationGate()
+        await gate.acquire()
+        var didAcquireForSelection = false
+
+        let selection = Task { @MainActor in
+            await gate.acquire()
+            didAcquireForSelection = true
+            gate.release()
+        }
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertFalse(didAcquireForSelection)
+
+        gate.release()
+        await selection.value
+
+        XCTAssertTrue(didAcquireForSelection)
+    }
+
+    func testSupersededLocalLoadCannotCommitAfterNewerLoad() async throws {
+        let suiteName = "AudioManagerGenerationTests.load-inversion.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let overrideStore = TrackBPMOverrideStore(defaults: defaults)
+
+        let preparer = AudioManager(bpmOverrideStore: overrideStore)
+        await preparer.loadSampleTrack(.clickLoop)
+        await preparer.loadSampleTrack(.warmupGroove)
+        let cachesDirectory = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let firstURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
+        let secondURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.warmupGroove.filename)
+        let barrier = LocalLoadCommitBarrier(blockedURL: firstURL)
+        let audio = AudioManager(
+            bpmOverrideStore: overrideStore,
+            localLoadCommitBarrier: { url in
+                await barrier.suspendIfNeeded(url: url)
+            }
+        )
+        audio.targetBPM = 180
+
+        let firstLoad = Task { @MainActor in
+            await audio.loadFile(url: firstURL)
+        }
+        await barrier.waitUntilSuspended()
+
+        await audio.loadFile(url: secondURL)
+        let secondTitle = audio.trackTitle
+        let secondBPM = audio.originalBPM
+        let secondDuration = audio.trackDuration
+        let secondBeatStatus = audio.beatSyncStatus
+        let secondCacheStatus = audio.beatAlignmentCacheStatus
+
+        barrier.resume()
+        _ = await firstLoad.value
+
+        XCTAssertEqual(audio.state, .ready)
+        XCTAssertEqual(audio.trackTitle, secondTitle)
+        XCTAssertEqual(audio.trackTitle, "Cadenza-warmupGroove")
+        XCTAssertEqual(audio.originalBPM, secondBPM)
+        XCTAssertEqual(audio.originalBPM, 180, accuracy: 0.5)
+        XCTAssertEqual(audio.trackDuration, secondDuration)
+        XCTAssertEqual(audio.beatSyncStatus, secondBeatStatus)
+        XCTAssertEqual(audio.beatAlignmentCacheStatus, secondCacheStatus)
+        XCTAssertTrue(audio.hasBeatAlignmentAnalysis)
+    }
+
     func testStreamingControllerStartsOutsidePlaylistContextWithoutIdentity() {
         let streaming = AppleMusicStreamingController()
 
@@ -473,5 +546,36 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.beatSyncIssue, .lowConfidence)
         // 새 정책: 신뢰도 낮아도 BPM은 확정된 상태이므로 균등 간격 메트로놈은 동작.
         XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
+    }
+}
+
+@MainActor
+private final class LocalLoadCommitBarrier {
+    private let blockedURL: URL
+    private var isSuspended = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(blockedURL: URL) {
+        self.blockedURL = blockedURL.standardizedFileURL
+    }
+
+    func suspendIfNeeded(url: URL) async {
+        guard url.standardizedFileURL == blockedURL else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            isSuspended = true
+        }
+    }
+
+    func waitUntilSuspended() async {
+        while !isSuspended {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+        isSuspended = false
     }
 }

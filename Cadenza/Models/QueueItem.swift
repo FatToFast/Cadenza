@@ -262,6 +262,28 @@ struct StreamingTempoSkipCoordinator: Sendable, Equatable {
     }
 }
 
+struct StreamingTempoPolicyGate: Sendable, Equatable {
+    static func shouldEvaluate(hasSong: Bool, isLoading: Bool) -> Bool {
+        hasSong && !isLoading
+    }
+}
+
+struct StreamingQueueCommandSnapshot: Sendable, Equatable {
+    let selectionGeneration: Int
+    let expectedIdentity: String?
+
+    init(selectionGeneration: Int, expectedIdentity: String?) {
+        self.selectionGeneration = selectionGeneration
+        self.expectedIdentity = TempoSkipGuard.normalizedIdentity(expectedIdentity)
+    }
+
+    func isCurrent(selectionGeneration: Int, currentIdentity: String?) -> Bool {
+        guard self.selectionGeneration == selectionGeneration else { return false }
+        guard let expectedIdentity else { return true }
+        return TempoSkipGuard.normalizedIdentity(currentIdentity) == expectedIdentity
+    }
+}
+
 private extension QueueItem {
     static func localFile(url: URL, index: Int) -> QueueItem {
         let standardizedURL = url.standardizedFileURL

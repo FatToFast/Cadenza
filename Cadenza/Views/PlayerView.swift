@@ -1069,7 +1069,10 @@ struct PlayerView: View {
     }
 
     private func applyStreamingTempoAndAlignment() {
-        guard streaming.hasSong else { return }
+        guard StreamingTempoPolicyGate.shouldEvaluate(
+            hasSong: streaming.hasSong,
+            isLoading: streaming.isLoading
+        ) else { return }
         let bpm = streaming.currentBPM
         audio.setStreamingBeatAlignment(
             bpm: bpm,

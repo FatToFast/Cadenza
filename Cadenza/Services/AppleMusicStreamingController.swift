@@ -117,6 +117,32 @@ struct StreamingQueuePolicyContext: Sendable, Equatable {
 }
 
 @MainActor
+final class StreamingQueueMutationGate {
+    private var isHeld = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard isHeld else {
+            isHeld = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !waiters.isEmpty else {
+            isHeld = false
+            return
+        }
+
+        waiters.removeFirst().resume()
+    }
+}
+
+@MainActor
 final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var currentSong: Song?
     @Published private(set) var currentTitle: String?
@@ -152,6 +178,8 @@ final class AppleMusicStreamingController: ObservableObject {
     private var desiredPlaybackRate: Float = 1.0
     private var queuePolicyContext = StreamingQueuePolicyContext.empty
     private var selectionGeneration = 0
+    private let queueMutationGate = StreamingQueueMutationGate()
+    private var isQueueMutationInFlight = false
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
     private let bpmOverrideStore: TrackBPMOverrideStore
 
@@ -185,7 +213,6 @@ final class AppleMusicStreamingController: ObservableObject {
         selectionGeneration &+= 1
         let generation = selectionGeneration
 
-        player.stop()
         queueCancellable = nil
         stateCancellable = nil
         nowPlayingTask?.cancel()
@@ -268,6 +295,11 @@ final class AppleMusicStreamingController: ObservableObject {
             artworkURL: song.artwork?.url(width: 600, height: 600)
         )
 
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration else { return }
+        player.stop()
+
         let status = await ensureAuthorization()
         guard generation == selectionGeneration else { return }
         guard status == .authorized else {
@@ -324,6 +356,11 @@ final class AppleMusicStreamingController: ObservableObject {
             artist: entry.artistName,
             artworkURL: entry.artwork?.url(width: 600, height: 600)
         )
+
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration else { return }
+        player.stop()
 
         let status = await ensureAuthorization()
         guard generation == selectionGeneration else { return }
@@ -616,13 +653,25 @@ final class AppleMusicStreamingController: ObservableObject {
         validateBeforeSkip: @MainActor () -> Bool
     ) async -> Bool {
         guard currentTitle != nil else { return false }
-        if let expectedIdentity {
-            guard let expectedIdentity = TempoSkipGuard.normalizedIdentity(expectedIdentity),
-                  TempoSkipGuard.normalizedIdentity(currentQueueIdentity) == expectedIdentity else {
-                return false
-            }
+        let snapshot = StreamingQueueCommandSnapshot(
+            selectionGeneration: selectionGeneration,
+            expectedIdentity: expectedIdentity
+        )
+        if expectedIdentity != nil, snapshot.expectedIdentity == nil {
+            return false
         }
-        guard validateBeforeSkip() else { return false }
+
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard currentTitle != nil,
+              snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+              ),
+              validateBeforeSkip() else { return false }
+
+        isQueueMutationInFlight = true
+        defer { isQueueMutationInFlight = false }
 
         do {
             switch direction {
@@ -632,12 +681,22 @@ final class AppleMusicStreamingController: ObservableObject {
                 try await player.skipToPreviousEntry()
             }
 
+            guard snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+            ) else { return false }
+
+            isQueueMutationInFlight = false
             syncPlaybackStatus()
             syncCurrentEntryFromQueue()
             applyPlaybackRate(playbackRate)
             reapplyPlaybackRateAfterStartup()
             return true
         } catch {
+            guard snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+            ) else { return false }
             errorMessage = direction == .next
                 ? "다음 곡으로 넘어갈 수 없습니다"
                 : "이전 곡으로 돌아갈 수 없습니다"
@@ -682,6 +741,7 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     private func syncCurrentEntryFromQueue() {
+        guard !isQueueMutationInFlight else { return }
         guard let entry = player.queue.currentEntry else { return }
         var context = queuePolicyContext
         context.replaceIdentity(queueIdentity(for: entry))
