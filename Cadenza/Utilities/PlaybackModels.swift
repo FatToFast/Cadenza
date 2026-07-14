@@ -534,15 +534,14 @@ struct RunningPreviewSignal: Sendable, Equatable {
 
 struct RunningCadenceFit: Sendable, Equatable {
     static let targetCadence: Double = 180
-    private static let pulseMultipliers: [Double] = [1, 1.5, 2, 3]
 
     let originalBPM: Double?
     let targetCadence: Double
-    let pulseMultiplier: Double
     let playbackRate: Double
     let nativeFootCadence: Double
     let status: RunningCadenceFitStatus
     let riskReason: RunningCadenceRiskReason?
+    private let tempoMode: BPMRange.TempoMode?
 
     var isRecommended: Bool {
         status == .excellent || status == .usable
@@ -573,10 +572,19 @@ struct RunningCadenceFit: Sendable, Equatable {
     var detailText: String {
         guard let originalBPM else { return "BPM 데이터 필요" }
         let ratePercent = Int((playbackRate * 100).rounded())
-        let multiplierLabel = pulseMultiplier == floor(pulseMultiplier)
-            ? "\(Int(pulseMultiplier))x"
-            : String(format: "%.1fx", pulseMultiplier)
-        return "\(Int(originalBPM.rounded())) BPM · \(multiplierLabel) · \(ratePercent)%"
+        let cadence = Int(nativeFootCadence.rounded())
+        let rateDescription: String
+        switch tempoMode {
+        case .originalSpeed:
+            rateDescription = "원곡 속도"
+        case .adjustedSpeed:
+            rateDescription = "\(ratePercent)%"
+        case .rejected:
+            rateDescription = "필요 \(ratePercent)%"
+        case nil:
+            return "BPM 데이터 필요"
+        }
+        return "\(Int(originalBPM.rounded())) BPM · \(cadence) SPM · \(rateDescription)"
     }
 
     static func evaluate(
@@ -584,85 +592,42 @@ struct RunningCadenceFit: Sendable, Equatable {
         targetCadence: Double = Self.targetCadence,
         previewSignal: RunningPreviewSignal? = nil
     ) -> RunningCadenceFit {
-        guard let originalBPM,
-              originalBPM.isFinite,
-              originalBPM > 0,
-              targetCadence.isFinite,
-              targetCadence > 0 else {
+        guard let originalBPM else {
             return RunningCadenceFit(
                 originalBPM: nil,
                 targetCadence: targetCadence,
-                pulseMultiplier: 1,
                 playbackRate: 1,
                 nativeFootCadence: 0,
                 status: .unknown,
-                riskReason: nil
+                riskReason: nil,
+                tempoMode: nil
             )
         }
 
-        let candidates = pulseMultipliers.map { multiplier in
-            let nativeCadence = originalBPM * multiplier
-            let playbackRate = targetCadence / nativeCadence
-            return RunningCadenceFit(
-                originalBPM: originalBPM,
-                targetCadence: targetCadence,
-                pulseMultiplier: multiplier,
-                playbackRate: playbackRate,
-                nativeFootCadence: nativeCadence,
-                status: status(forPlaybackRate: playbackRate),
-                riskReason: nil
-            )
-        }
-
-        let nonSlowingCandidates = candidates.filter { $0.playbackRate >= 1 }
-        let preferredCandidates = nonSlowingCandidates.isEmpty ? candidates : nonSlowingCandidates
-
-        let fit = preferredCandidates.min { lhs, rhs in
-            let lhsPenalty = fitPenalty(lhs)
-            let rhsPenalty = fitPenalty(rhs)
-            if lhsPenalty == rhsPenalty {
-                return lhs.pulseMultiplier < rhs.pulseMultiplier
-            }
-            return lhsPenalty < rhsPenalty
-        } ?? RunningCadenceFit(
-            originalBPM: originalBPM,
+        let plan = BPMRange.tempoPlan(
             targetCadence: targetCadence,
-            pulseMultiplier: 1,
-            playbackRate: targetCadence / originalBPM,
-            nativeFootCadence: originalBPM,
-            status: .awkward,
-            riskReason: nil
+            originalBPM: originalBPM
+        )
+        let fit = RunningCadenceFit(
+            originalBPM: originalBPM.isFinite && originalBPM > 0 ? originalBPM : nil,
+            targetCadence: plan.baseCadence,
+            playbackRate: plan.requiredPlaybackRate,
+            nativeFootCadence: plan.effectiveCadence,
+            status: status(for: plan),
+            riskReason: nil,
+            tempoMode: plan.mode
         )
 
         return applyPreviewSignal(previewSignal, to: fit)
     }
 
-    private static func status(forPlaybackRate playbackRate: Double) -> RunningCadenceFitStatus {
-        guard playbackRate.isFinite,
-              playbackRate >= Double(BPMRange.rateMin),
-              playbackRate <= Double(BPMRange.rateMax) else {
-            return .awkward
-        }
+    private static func status(for plan: BPMRange.TempoPlan) -> RunningCadenceFitStatus {
+        guard plan.isPlayable else { return .unsuitable }
 
-        let deviation = abs(playbackRate - 1)
+        let deviation = abs(plan.requiredPlaybackRate - 1)
         if deviation <= 0.07 { return .excellent }
         if deviation <= 0.14 { return .usable }
-        if deviation <= 0.18 { return .awkward }
-        return .unsuitable
-    }
-
-    private static func fitPenalty(_ fit: RunningCadenceFit) -> Double {
-        let ratePenalty = abs(log(max(fit.playbackRate, 0.0001)))
-        let multiplierPenalty: Double
-        switch fit.pulseMultiplier {
-        case 1, 2:
-            multiplierPenalty = 0
-        case 1.5:
-            multiplierPenalty = 0.01
-        default:
-            multiplierPenalty = 0.04
-        }
-        return ratePenalty + multiplierPenalty
+        return .awkward
     }
 
     private static func applyPreviewSignal(
@@ -695,11 +660,11 @@ struct RunningCadenceFit: Sendable, Equatable {
         RunningCadenceFit(
             originalBPM: originalBPM,
             targetCadence: targetCadence,
-            pulseMultiplier: pulseMultiplier,
             playbackRate: playbackRate,
             nativeFootCadence: nativeFootCadence,
             status: status,
-            riskReason: riskReason
+            riskReason: riskReason,
+            tempoMode: tempoMode
         )
     }
 }

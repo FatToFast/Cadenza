@@ -496,42 +496,86 @@ final class PlaybackModelsTests: XCTestCase {
         let fit = RunningCadenceFit.evaluate(originalBPM: 90)
 
         XCTAssertEqual(fit.status, .excellent)
-        XCTAssertEqual(fit.pulseMultiplier, 2.0)
         XCTAssertEqual(fit.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(fit.nativeFootCadence, 180, accuracy: 0.0001)
+        XCTAssertEqual(fit.detailText, "90 BPM · 180 SPM · 원곡 속도")
     }
 
-    func testRunningCadenceFitRecognizesOneTwentyAsNaturalThreeOverTwo() {
-        let fit = RunningCadenceFit.evaluate(originalBPM: 120)
+    func testRunningCadenceFitReportsNativeNinetyFiveAsOriginalSpeed() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 95, targetCadence: 180)
 
+        XCTAssertEqual(fit.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(fit.nativeFootCadence, 190, accuracy: 0.0001)
         XCTAssertEqual(fit.status, .excellent)
-        XCTAssertEqual(fit.pulseMultiplier, 1.5)
-        XCTAssertEqual(fit.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertTrue(fit.isRecommended)
+        XCTAssertEqual(fit.detailText, "95 BPM · 190 SPM · 원곡 속도")
     }
 
-    func testRunningCadenceFitMarksLargeSpeedChangesAsAwkward() {
-        let fit = RunningCadenceFit.evaluate(originalBPM: 150)
+    func testRunningCadenceFitUsesRejectedTempoPlanForOneTwenty() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 120)
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 120)
+
+        XCTAssertFalse(plan.isPlayable)
+        XCTAssertEqual(fit.playbackRate, plan.requiredPlaybackRate, accuracy: 0.0001)
+        XCTAssertEqual(fit.nativeFootCadence, plan.effectiveCadence, accuracy: 0.0001)
+        XCTAssertEqual(fit.status, .unsuitable)
+        XCTAssertEqual(fit.isRecommended, plan.isPlayable)
+        XCTAssertEqual(fit.detailText, "120 BPM · 180 SPM · 필요 150%")
+    }
+
+    func testRunningCadenceFitReportsAdjustedTempoPlanRateAndCadence() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 80, targetCadence: 180)
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 80)
+
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(fit.playbackRate, plan.requiredPlaybackRate, accuracy: 0.0001)
+        XCTAssertEqual(fit.nativeFootCadence, plan.effectiveCadence, accuracy: 0.0001)
+        XCTAssertEqual(fit.status, .usable)
+        XCTAssertTrue(fit.isRecommended)
+        XCTAssertEqual(fit.detailText, "80 BPM · 180 SPM · 113%")
+    }
+
+    func testRunningCadenceFitDoesNotPresentRejectedRateAsPlayable() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 96, targetCadence: 180)
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 96)
+
+        XCTAssertFalse(plan.isPlayable)
+        XCTAssertEqual(fit.playbackRate, plan.requiredPlaybackRate, accuracy: 0.0001)
+        XCTAssertEqual(fit.status, .unsuitable)
+        XCTAssertFalse(fit.isRecommended)
+        XCTAssertTrue(fit.detailText.contains("필요"))
+    }
+
+    func testRunningCadenceFitMarksRejectedInvalidBPMAsUnsuitable() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 0)
 
         XCTAssertEqual(fit.status, .unsuitable)
         XCTAssertFalse(fit.isRecommended)
+        XCTAssertEqual(fit.badgeText, "러닝 부적합")
     }
 
-    func testRunningCadenceFitWarnsButDoesNotSlowOneHundredThreeBPM() {
-        let fit = RunningCadenceFit.evaluate(originalBPM: 103)
-
-        XCTAssertEqual(fit.status, .awkward)
-        XCTAssertGreaterThan(fit.playbackRate, 1.0)
-    }
-
-    func testRunningCadenceFitRejectsInvalidBPM() {
-        let fit = RunningCadenceFit.evaluate(originalBPM: 0)
+    func testRunningCadenceFitKeepsMissingBPMUnknown() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: nil)
 
         XCTAssertEqual(fit.status, .unknown)
         XCTAssertEqual(fit.badgeText, "BPM 미확인")
     }
 
+    func testRunningCadenceFitDoesNotExposeNonFiniteRejectedBPMForDisplay() {
+        for invalidBPM in [Double.nan, .infinity, -.infinity] {
+            let fit = RunningCadenceFit.evaluate(originalBPM: invalidBPM)
+
+            XCTAssertEqual(fit.status, .unsuitable)
+            XCTAssertNil(fit.originalBPM)
+            if fit.originalBPM == nil {
+                XCTAssertEqual(fit.detailText, "BPM 데이터 필요")
+            }
+        }
+    }
+
     func testRunningCadenceFitMarksLowPreviewConfidenceAsAwkward() {
         let fit = RunningCadenceFit.evaluate(
-            originalBPM: 120,
+            originalBPM: 90,
             previewSignal: RunningPreviewSignal(
                 confidence: 0.21,
                 beatTimesSeconds: [0.0, 0.5, 1.0, 1.5]
@@ -545,7 +589,7 @@ final class PlaybackModelsTests: XCTestCase {
 
     func testRunningCadenceFitMarksUnstablePreviewBeatGridAsUnsuitable() {
         let fit = RunningCadenceFit.evaluate(
-            originalBPM: 120,
+            originalBPM: 90,
             previewSignal: RunningPreviewSignal(
                 confidence: 0.8,
                 beatTimesSeconds: [0.0, 0.5, 1.18, 1.47, 2.1]
@@ -557,9 +601,18 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.badgeText, "박자 불안정")
     }
 
-    func testRunningCadenceFitMarksExtremeSpeedUpAsUnsuitable() {
+    func testRunningCadenceFitMarksMaximumAllowedSpeedAsAwkward() {
         let fit = RunningCadenceFit.evaluate(originalBPM: 72)
 
+        XCTAssertEqual(fit.playbackRate, 1.25, accuracy: 0.0001)
+        XCTAssertEqual(fit.status, .awkward)
+        XCTAssertEqual(fit.badgeText, "박자 주의")
+    }
+
+    func testRunningCadenceFitMarksRejectedSpeedUpAsUnsuitable() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 70)
+
+        XCTAssertGreaterThan(fit.playbackRate, BPMRange.maximumQualityRate)
         XCTAssertEqual(fit.status, .unsuitable)
         XCTAssertEqual(fit.badgeText, "러닝 부적합")
     }
