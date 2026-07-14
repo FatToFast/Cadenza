@@ -104,25 +104,45 @@ final class AudioManager: ObservableObject {
         didSet { metronomeNode.volume = metronomeVolume }
     }
 
+    var tempoPlan: BPMRange.TempoPlan {
+        BPMRange.tempoPlan(targetCadence: targetBPM, originalBPM: originalBPM)
+    }
+
     /// targetBPM(러닝 케이던스)를 원곡 템포에 옥타브 폴딩한 "음악의 목표 템포".
-    /// 재생 배속·메트로놈 세분화는 케이던스가 아니라 이 값을 기준으로 삼는다.
     var musicalTargetBPM: Double {
-        BPMRange.foldedMusicalTarget(targetCadence: targetBPM, originalBPM: originalBPM)
+        tempoPlan.musicalTarget
+    }
+
+    var effectiveCadence: Double {
+        tempoPlan.effectiveCadence
     }
 
     var playbackRate: Double {
-        guard originalBPM > 0 else { return 1.0 }
-        let rate = musicalTargetBPM / originalBPM
-        return min(max(rate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
+        guard originalBPMSource != .assumedDefault else { return 1.0 }
+        return tempoPlan.playbackRate
     }
 
     var metronomeBPM: Double {
-        BPMRange.metronomeCadence(forTargetBPM: targetBPM)
+        effectiveCadence
+    }
+
+    var isCurrentTempoPlayable: Bool {
+        originalBPMSource != .assumedDefault && tempoPlan.isPlayable
+    }
+
+    var tempoRejectionMessage: String? {
+        guard originalBPMSource != .assumedDefault, !tempoPlan.isPlayable else { return nil }
+        return "케이던스 범위에 맞지 않는 곡입니다"
     }
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
     var hasLoadedTrack: Bool { audioFile != nil }
-    var canStartPlayback: Bool { audioFile != nil || canRunMetronomeForCurrentBeatSync }
+    var canStartPlayback: Bool {
+        if audioFile != nil {
+            return isCurrentTempoPlayable
+        }
+        return canRunMetronomeForCurrentBeatSync
+    }
     var needsOriginalBPMInput: Bool { audioFile != nil && originalBPMSource == .assumedDefault }
     var playbackProgress: Double {
         guard trackDuration > 0 else { return 0 }

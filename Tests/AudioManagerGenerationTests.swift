@@ -45,6 +45,122 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.playbackRate, 90 / 89.96, accuracy: 0.0001)
     }
 
+    func testConfirmedNinetyFiveBPMUsesNativeOneNinetyCadence() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        audio.setStreamingBeatAlignment(
+            bpm: 95,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.tempoPlan.effectiveCadence, 190)
+        XCTAssertEqual(audio.playbackRate, audio.tempoPlan.playbackRate, accuracy: 0.0001)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(audio.metronomeBPM, 190)
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+    }
+
+    func testConfirmedNinetySixBPMRejectsUnsafePlaybackRate() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertFalse(audio.tempoPlan.isPlayable)
+        XCTAssertGreaterThan(audio.tempoPlan.requiredPlaybackRate, 1.25)
+        XCTAssertFalse(audio.isCurrentTempoPlayable)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
+    }
+
+    func testConfirmedEightyNineBPMAdjustsToBaseCadence() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        audio.setStreamingBeatAlignment(
+            bpm: 89,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+        XCTAssertEqual(audio.tempoPlan.effectiveCadence, 180)
+        XCTAssertEqual(audio.playbackRate, 90.0 / 89.0, accuracy: 0.0001)
+        XCTAssertEqual(audio.metronomeBPM, 180)
+    }
+
+    func testAssumedDefaultBPMNeverAppliesTempoTransform() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        audio.applyAutoBPMDefault(144)
+
+        XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
+        XCTAssertEqual(audio.tempoPlan.requiredPlaybackRate, 1.25, accuracy: 0.0001)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+        XCTAssertFalse(audio.isCurrentTempoPlayable)
+        XCTAssertNil(audio.tempoRejectionMessage)
+    }
+
+    func testMetronomeOnlyModeCanStartWithoutPlayableTrackTempo() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.metronomeEnabled = true
+
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertFalse(audio.hasLoadedTrack)
+        XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
+        XCTAssertFalse(audio.isCurrentTempoPlayable)
+        XCTAssertTrue(audio.canStartPlayback)
+    }
+
+    func testConfirmedRejectedLocalTrackCannotStartPlayback() async {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        await audio.loadSampleTrack(.clickLoop)
+
+        XCTAssertEqual(audio.state, .ready)
+        XCTAssertTrue(audio.hasLoadedTrack)
+        XCTAssertFalse(audio.isCurrentTempoPlayable)
+        XCTAssertFalse(audio.canStartPlayback)
+
+        audio.play()
+
+        XCTAssertEqual(audio.state, .ready)
+    }
+
+    func testUnconfirmedLocalTrackCannotStartPlayback() async {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        await audio.loadSampleTrack(.warmupGroove)
+        audio.setStreamingBeatAlignment(
+            bpm: nil,
+            source: .assumedDefault,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.state, .ready)
+        XCTAssertTrue(audio.hasLoadedTrack)
+        XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
+        XCTAssertFalse(audio.canStartPlayback)
+
+        audio.play()
+
+        XCTAssertEqual(audio.state, .ready)
+    }
+
     /// 스티키 케이던스: streaming BPM 해석이 도착해도 사용자의 케이던스는 유지된다.
     func testStreamingBeatAlignmentDoesNotOverwriteStickyCadence() {
         let audio = AudioManager()
