@@ -636,7 +636,27 @@ struct PlayerView: View {
             Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
+
+            if canRetryStreamingBPMAnalysis {
+                Button {
+                    _ = streaming.retryCurrentBPMAnalysis()
+                } label: {
+                    Label("다시 분석", systemImage: "arrow.clockwise")
+                        .font(.cadenzaBody)
+                        .foregroundColor(.cadenzaAccent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.cadenzaBackgroundSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("현재 곡의 BPM과 박자 정보를 다시 확인합니다")
+            }
         }
+    }
+
+    private var canRetryStreamingBPMAnalysis: Bool {
+        guard streaming.hasSong, streaming.currentBPMSource != .manual else { return false }
+        return currentBeatSyncStatus == .needsConfirmation || currentBeatSyncStatus == .bpmOnly
     }
 
     // MARK: - Metronome Controls

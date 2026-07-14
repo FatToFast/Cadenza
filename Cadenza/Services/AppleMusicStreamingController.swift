@@ -20,6 +20,29 @@ struct StreamingBPMResolution: Equatable, Sendable {
     let didAttemptGetSongBPM: Bool
 }
 
+struct PreviewAnalysisRetryPolicy: Equatable, Sendable {
+    let maxAutomaticAttempts: Int
+    private var failureCountsByIdentity: [String: Int] = [:]
+
+    init(maxAutomaticAttempts: Int = 1) {
+        self.maxAutomaticAttempts = max(0, maxAutomaticAttempts)
+    }
+
+    func shouldAttempt(identity: String) -> Bool {
+        failureCountsByIdentity[identity, default: 0] < maxAutomaticAttempts
+    }
+
+    mutating func recordFailure(identity: String) {
+        let currentCount = failureCountsByIdentity[identity, default: 0]
+        guard currentCount < maxAutomaticAttempts else { return }
+        failureCountsByIdentity[identity] = currentCount + 1
+    }
+
+    mutating func reset(identity: String) {
+        failureCountsByIdentity.removeValue(forKey: identity)
+    }
+}
+
 struct StreamingBPMResolver: Sendable {
     typealias GetSongBPMLookup = @Sendable (_ title: String, _ artist: String?, _ appleMusicID: String?, _ isrc: String?) async -> GetSongBPMService.Result?
     typealias PreviewAnalysisLookup = @Sendable () async -> BeatAlignmentAnalysis?
@@ -31,24 +54,46 @@ struct StreamingBPMResolver: Sendable {
         cachedResult: StreamingBPMResult?,
         shouldTryGetSongBPM: Bool,
         shouldTryPreviewAnalysis: Bool,
+        forcePreviewAnalysis: Bool = false,
         title: String,
         artist: String?,
         appleMusicID: String?,
         isrc: String? = nil
     ) async -> StreamingBPMResolution {
+        var externalResult: StreamingBPMResult?
         if shouldTryGetSongBPM,
            let external = await getSongBPM(title, artist, appleMusicID, isrc) {
+            externalResult = StreamingBPMResult(
+                bpm: external.bpm,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            )
+        }
+
+        if !forcePreviewAnalysis, let externalResult {
             return StreamingBPMResolution(
-                result: StreamingBPMResult(
-                    bpm: external.bpm,
-                    source: .metadata,
-                    beatOffsetSeconds: nil,
-                    beatTimesSeconds: nil,
-                    confidence: nil,
-                    beatSyncStatus: .bpmOnly,
-                    beatSyncIssue: .missingBeatGrid
-                ),
-                didAttemptGetSongBPM: true
+                result: externalResult,
+                didAttemptGetSongBPM: shouldTryGetSongBPM
+            )
+        }
+
+        if forcePreviewAnalysis,
+           shouldTryPreviewAnalysis,
+           let analysis = await previewAnalysis() {
+            return StreamingBPMResolution(
+                result: result(for: analysis),
+                didAttemptGetSongBPM: shouldTryGetSongBPM
+            )
+        }
+
+        if let externalResult {
+            return StreamingBPMResolution(
+                result: externalResult,
+                didAttemptGetSongBPM: shouldTryGetSongBPM
             )
         }
 
@@ -67,22 +112,26 @@ struct StreamingBPMResolver: Sendable {
             )
         }
 
+        return StreamingBPMResolution(
+            result: result(for: analysis),
+            didAttemptGetSongBPM: shouldTryGetSongBPM
+        )
+    }
+
+    private func result(for analysis: BeatAlignmentAnalysis) -> StreamingBPMResult {
         let assessment = BeatSyncReliability.assess(
             originalBPM: analysis.estimatedBPM,
             confidence: analysis.confidence,
             beatTimesSeconds: analysis.beatTimesSeconds ?? []
         )
-        return StreamingBPMResolution(
-            result: StreamingBPMResult(
-                bpm: analysis.estimatedBPM,
-                source: .analysis,
-                beatOffsetSeconds: assessment.shouldUseBeatGrid ? analysis.beatOffsetSeconds : nil,
-                beatTimesSeconds: assessment.shouldUseBeatGrid ? analysis.beatTimesSeconds : nil,
-                confidence: analysis.confidence,
-                beatSyncStatus: assessment.status,
-                beatSyncIssue: assessment.issue
-            ),
-            didAttemptGetSongBPM: shouldTryGetSongBPM
+        return StreamingBPMResult(
+            bpm: analysis.estimatedBPM,
+            source: .analysis,
+            beatOffsetSeconds: assessment.shouldUseBeatGrid ? analysis.beatOffsetSeconds : nil,
+            beatTimesSeconds: assessment.shouldUseBeatGrid ? analysis.beatTimesSeconds : nil,
+            confidence: analysis.confidence,
+            beatSyncStatus: assessment.status,
+            beatSyncIssue: assessment.issue
         )
     }
 }
@@ -171,7 +220,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private var nowPlayingTask: Task<Void, Never>?
     private var bpmAnalysisTask: Task<Void, Never>?
     private var activePreviewAnalysisKey: String?
-    private var failedPreviewAnalysisKeys: Set<String> = []
+    private var previewAnalysisRetryPolicy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
     private var getSongBPMAttemptedKeys: Set<String> = []
     private var bpmCacheByKey: [String: StreamingBPMResult] = [:]
     private var didBuildBPMCache = false
@@ -451,7 +500,6 @@ final class AppleMusicStreamingController: ObservableObject {
         guard !entries.isEmpty else { return }
 
         logger.notice("[bpm_preload] start entries=\(entries.count)")
-        print("[bpm_preload] start entries=\(entries.count)")
         Task(priority: .utility) { [weak self] in
             for entry in entries {
                 let lookup = self?.trackLookup(for: entry) ?? GetSongBPMService.TrackLookup(
@@ -468,7 +516,6 @@ final class AppleMusicStreamingController: ObservableObject {
                 ) else {
                     await MainActor.run { [weak self] in
                         self?.logger.notice("[bpm_preload] empty title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public)")
-                        print("[bpm_preload] empty title=\(entry.title) artist=\(entry.artistName)")
                     }
                     continue
                 }
@@ -496,7 +543,6 @@ final class AppleMusicStreamingController: ObservableObject {
                         self.applyResolvedBPM(bpmResult)
                     }
                     self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
-                    print("[bpm_preload] success title=\(entry.title) artist=\(entry.artistName) bpm=\(result.bpm)")
                 }
             }
         }
@@ -664,6 +710,20 @@ final class AppleMusicStreamingController: ObservableObject {
             )
         }
         return true
+    }
+
+    @discardableResult
+    func retryCurrentBPMAnalysis() -> Bool {
+        guard currentBPMSource != .manual, currentTrackOverrideBPM() == nil else {
+            return false
+        }
+
+        if let currentSong {
+            return retryPreviewBPMAnalysis(for: currentSong)
+        }
+
+        guard let entry = player.queue.currentEntry else { return false }
+        return retryPreviewBPMAnalysis(for: entry)
     }
 
     private enum SkipDirection {
@@ -977,14 +1037,58 @@ final class AppleMusicStreamingController: ObservableObject {
         return keys
     }
 
-    private func startPreviewBPMAnalysisIfNeeded(for song: Song) {
+    private func retryPreviewBPMAnalysis(for song: Song) -> Bool {
+        let identityKey = previewAnalysisIdentityKey(
+            songID: song.id.rawValue,
+            title: song.title,
+            artist: song.artistName,
+            albumTitle: song.albumTitle
+        )
+        preparePreviewBPMRetry(identityKey: identityKey)
+        startPreviewBPMAnalysisIfNeeded(for: song, forcePreviewAnalysis: true)
+        return true
+    }
+
+    private func retryPreviewBPMAnalysis(for entry: MusicKit.MusicPlayer.Queue.Entry) -> Bool {
+        if case .song(let song)? = entry.item {
+            return retryPreviewBPMAnalysis(for: song)
+        }
+        if let song = entry.transientItem as? Song {
+            return retryPreviewBPMAnalysis(for: song)
+        }
+
+        let identityKey = previewAnalysisIdentityKey(
+            songID: entry.id,
+            title: entry.title,
+            artist: artistName(for: entry) ?? entry.subtitle,
+            albumTitle: nil
+        )
+        preparePreviewBPMRetry(identityKey: identityKey)
+        startPreviewBPMAnalysisIfNeeded(for: entry, forcePreviewAnalysis: true)
+        return true
+    }
+
+    private func preparePreviewBPMRetry(identityKey: String) {
+        previewAnalysisRetryPolicy.reset(identity: identityKey)
+        getSongBPMAttemptedKeys.remove(identityKey)
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+        errorMessage = nil
+    }
+
+    private func startPreviewBPMAnalysisIfNeeded(
+        for song: Song,
+        forcePreviewAnalysis: Bool = false
+    ) {
         startPreviewBPMAnalysisIfNeeded(
             songID: song.id.rawValue,
             isrc: song.isrc,
             title: song.title,
             artist: song.artistName,
             albumTitle: song.albumTitle,
-            previewAssets: song.previewAssets
+            previewAssets: song.previewAssets,
+            forcePreviewAnalysis: forcePreviewAnalysis
         )
     }
 
@@ -1004,15 +1108,35 @@ final class AppleMusicStreamingController: ObservableObject {
         )
     }
 
-    private func startPreviewBPMAnalysisIfNeeded(for entry: MusicKit.MusicPlayer.Queue.Entry) {
+    private func startPreviewBPMAnalysisIfNeeded(
+        for entry: MusicKit.MusicPlayer.Queue.Entry,
+        forcePreviewAnalysis: Bool = false
+    ) {
         if case .song(let song)? = entry.item {
-            startPreviewBPMAnalysisIfNeeded(for: song)
+            startPreviewBPMAnalysisIfNeeded(
+                for: song,
+                forcePreviewAnalysis: forcePreviewAnalysis
+            )
             return
         }
 
         if let song = entry.transientItem as? Song {
-            startPreviewBPMAnalysisIfNeeded(for: song)
+            startPreviewBPMAnalysisIfNeeded(
+                for: song,
+                forcePreviewAnalysis: forcePreviewAnalysis
+            )
+            return
         }
+
+        startPreviewBPMAnalysisIfNeeded(
+            songID: entry.id,
+            isrc: nil,
+            title: entry.title,
+            artist: artistName(for: entry) ?? entry.subtitle,
+            albumTitle: nil,
+            previewAssets: nil,
+            forcePreviewAnalysis: forcePreviewAnalysis
+        )
     }
 
     private func startPreviewBPMAnalysisIfNeeded(
@@ -1021,14 +1145,22 @@ final class AppleMusicStreamingController: ObservableObject {
         title: String,
         artist: String?,
         albumTitle: String?,
-        previewAssets: [PreviewAsset]?
+        previewAssets: [PreviewAsset]?,
+        forcePreviewAnalysis: Bool = false
     ) {
-        let identityKey = songID.map(storeKey) ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
+        let identityKey = previewAnalysisIdentityKey(
+            songID: songID,
+            title: title,
+            artist: artist,
+            albumTitle: albumTitle
+        )
         let cachedResult = bpmCacheByKey[identityKey]
         let shouldTryGetSongBPM = !getSongBPMAttemptedKeys.contains(identityKey)
-        guard cachedResult == nil || shouldTryGetSongBPM else { return }
+        let shouldTryPreviewAnalysis = forcePreviewAnalysis
+            || (cachedResult == nil && previewAnalysisRetryPolicy.shouldAttempt(identity: identityKey))
+        guard cachedResult == nil || shouldTryGetSongBPM || shouldTryPreviewAnalysis else { return }
         guard activePreviewAnalysisKey != identityKey else { return }
-        guard shouldTryGetSongBPM || !failedPreviewAnalysisKeys.contains(identityKey) else { return }
+        guard shouldTryGetSongBPM || shouldTryPreviewAnalysis else { return }
         let previewAsset = previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil })
         let directPreviewURL = previewAsset?.url
         let hlsPreviewURL = previewAsset?.hlsURL
@@ -1054,14 +1186,16 @@ final class AppleMusicStreamingController: ObservableObject {
                         directURL: directPreviewURL,
                         hlsURL: hlsPreviewURL,
                         title: title,
-                        artist: artist
+                        artist: artist,
+                        forceRefresh: forcePreviewAnalysis
                     )
                 }
             )
             let resolution = await resolver.resolve(
                 cachedResult: cachedResult,
                 shouldTryGetSongBPM: shouldTryGetSongBPM,
-                shouldTryPreviewAnalysis: cachedResult == nil,
+                shouldTryPreviewAnalysis: shouldTryPreviewAnalysis,
+                forcePreviewAnalysis: forcePreviewAnalysis,
                 title: title,
                 artist: artist,
                 appleMusicID: songID,
@@ -1071,7 +1205,7 @@ final class AppleMusicStreamingController: ObservableObject {
             guard let self else { return }
             self.activePreviewAnalysisKey = nil
             guard let result = resolution.result else {
-                self.failedPreviewAnalysisKeys.insert(identityKey)
+                self.previewAnalysisRetryPolicy.recordFailure(identity: identityKey)
                 self.logger.info("[bpm_resolver] failed title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public)")
                 return
             }
@@ -1094,6 +1228,16 @@ final class AppleMusicStreamingController: ObservableObject {
             }
             self.logger.info("[bpm_resolver] success bpm=\(result.bpm) source=\(result.source.badgeText, privacy: .public) title=\(title, privacy: .public)")
         }
+    }
+
+    private func previewAnalysisIdentityKey(
+        songID: String?,
+        title: String,
+        artist: String?,
+        albumTitle: String?
+    ) -> String {
+        songID.map(storeKey)
+            ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
     }
 
     private func cacheBPMResult(
@@ -1292,25 +1436,37 @@ actor PreviewBPMAnalyzer {
         directURL: URL?,
         hlsURL: URL?,
         title: String,
-        artist: String?
+        artist: String?,
+        forceRefresh: Bool = false
     ) async -> BeatAlignmentAnalysis? {
         let lookupKey = metadataKey(title: title, artist: artist)
-        if let cached = cacheByLookupKey[lookupKey] {
+        if !forceRefresh, let cached = cacheByLookupKey[lookupKey] {
             return cached
         }
 
-        if let directURL, let analysis = await estimateBeatAlignment(fromDirectURL: directURL) {
+        if let directURL,
+           let analysis = await estimateBeatAlignment(
+                fromDirectURL: directURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
 
-        if let hlsURL, let analysis = await estimateBeatAlignment(fromHLSURL: hlsURL) {
+        if let hlsURL,
+           let analysis = await estimateBeatAlignment(
+                fromHLSURL: hlsURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
 
         if let fallbackURL = await findITunesPreviewURL(title: title, artist: artist),
-           let analysis = await estimateBeatAlignment(fromDirectURL: fallbackURL) {
+           let analysis = await estimateBeatAlignment(
+                fromDirectURL: fallbackURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
@@ -1318,8 +1474,11 @@ actor PreviewBPMAnalyzer {
         return nil
     }
 
-    private func estimateBeatAlignment(fromDirectURL url: URL) async -> BeatAlignmentAnalysis? {
-        if let cached = cacheByURL[url] {
+    private func estimateBeatAlignment(
+        fromDirectURL url: URL,
+        forceRefresh: Bool = false
+    ) async -> BeatAlignmentAnalysis? {
+        if !forceRefresh, let cached = cacheByURL[url] {
             return cached
         }
 
@@ -1346,8 +1505,11 @@ actor PreviewBPMAnalyzer {
         }
     }
 
-    private func estimateBeatAlignment(fromHLSURL url: URL) async -> BeatAlignmentAnalysis? {
-        if let cached = cacheByURL[url] {
+    private func estimateBeatAlignment(
+        fromHLSURL url: URL,
+        forceRefresh: Bool = false
+    ) async -> BeatAlignmentAnalysis? {
+        if !forceRefresh, let cached = cacheByURL[url] {
             return cached
         }
 

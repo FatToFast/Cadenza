@@ -2,6 +2,98 @@ import XCTest
 @testable import Cadenza
 
 final class StreamingBPMResolverTests: XCTestCase {
+    func testPreviewAnalysisRetryPolicyAllowsOneAutomaticAttemptAndManualReset() {
+        var policy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
+
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:one"))
+        policy.recordFailure(identity: "store:one")
+        XCTAssertFalse(policy.shouldAttempt(identity: "store:one"))
+
+        policy.reset(identity: "store:one")
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:one"))
+    }
+
+    func testPreviewAnalysisRetryPolicyTracksIdentitiesIndependently() {
+        var policy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
+
+        policy.recordFailure(identity: "store:one")
+
+        XCTAssertFalse(policy.shouldAttempt(identity: "store:one"))
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:two"))
+    }
+
+    func testForcedPreviewAnalysisOverridesRefreshedExternalBPM() async {
+        let externalCounter = PreviewCallCounter()
+        let previewCounter = PreviewCallCounter()
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in
+                await externalCounter.increment()
+                return GetSongBPMService.Result(
+                    bpm: 103,
+                    matchedArtist: "Artist",
+                    matchedTitle: "Song"
+                )
+            },
+            previewAnalysis: {
+                await previewCounter.increment()
+                return Self.previewAnalysis(bpm: 94)
+            }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: StreamingBPMResult(
+                bpm: 103,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            ),
+            shouldTryGetSongBPM: true,
+            shouldTryPreviewAnalysis: true,
+            forcePreviewAnalysis: true,
+            title: "Song",
+            artist: "Artist",
+            appleMusicID: "12345"
+        )
+
+        let externalCallCount = await externalCounter.countValue()
+        let previewCallCount = await previewCounter.countValue()
+        XCTAssertEqual(externalCallCount, 1)
+        XCTAssertEqual(previewCallCount, 1)
+        XCTAssertEqual(resolution.result?.bpm, 94)
+        XCTAssertEqual(resolution.result?.source, .analysis)
+        XCTAssertTrue(resolution.didAttemptGetSongBPM)
+    }
+
+    func testForcedPreviewFailureFallsBackToRefreshedExternalBPM() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in
+                GetSongBPMService.Result(
+                    bpm: 103,
+                    matchedArtist: "Artist",
+                    matchedTitle: "Song"
+                )
+            },
+            previewAnalysis: { nil }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: nil,
+            shouldTryGetSongBPM: true,
+            shouldTryPreviewAnalysis: true,
+            forcePreviewAnalysis: true,
+            title: "Song",
+            artist: "Artist",
+            appleMusicID: "12345"
+        )
+
+        XCTAssertEqual(resolution.result?.bpm, 103)
+        XCTAssertEqual(resolution.result?.source, .metadata)
+        XCTAssertTrue(resolution.didAttemptGetSongBPM)
+    }
+
     func testUsesGetSongBPMBeforePreviewAnalysis() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(
