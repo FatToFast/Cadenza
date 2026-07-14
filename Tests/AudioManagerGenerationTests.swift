@@ -162,10 +162,50 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertTrue(audio.hasLoadedTrack)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
         XCTAssertFalse(audio.canStartPlayback)
+        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
 
         audio.play()
 
         XCTAssertEqual(audio.state, .ready)
+    }
+
+    func testPlayingDirectLocalTrackPausesAndShowsErrorWhenManualBPMBecomesRejected() async {
+        let suiteName = "AudioManagerGenerationTests.manual-rejection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let audio = AudioManager(
+            bpmOverrideStore: TrackBPMOverrideStore(defaults: defaults)
+        )
+        audio.targetBPM = 180
+        await audio.loadSampleTrack(.warmupGroove)
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+
+        audio.play()
+        XCTAssertEqual(audio.state, .playing)
+
+        audio.setOriginalBPM(96)
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(audio.state, .paused)
+        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
+    }
+
+    func testPlayingDirectLocalTrackPausesAndShowsErrorWhenCadenceBecomesRejected() async {
+        let audio = AudioManager()
+        audio.targetBPM = 140
+        await audio.loadSampleTrack(.clickLoop)
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+
+        audio.play()
+        XCTAssertEqual(audio.state, .playing)
+
+        audio.targetBPM = 180
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(audio.state, .paused)
+        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
     }
 
     func testUnconfirmedLocalTrackCannotStartPlayback() async {
@@ -282,10 +322,74 @@ final class AudioManagerGenerationTests: XCTestCase {
             allowsAutomaticAdvance: false
         )
 
-        XCTAssertEqual(action, .keepCurrent)
+        XCTAssertEqual(action, .rejectCurrent)
         XCTAssertEqual(playlist.currentItem?.title, "a")
         XCTAssertNil(playlist.currentItem?.unplayableReason)
         XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
+    }
+
+    func testRejectedOneItemPlaylistReturnsDirectRejectionWithoutMarkingOrAdvancing() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        var playlist = LocalFilePlaylist(fileURLs: [
+            URL(fileURLWithPath: "/tmp/only.mp3"),
+        ])
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: true
+        )
+
+        XCTAssertEqual(action, .rejectCurrent)
+        XCTAssertEqual(playlist.currentItem?.title, "only")
+        XCTAssertNil(playlist.currentItem?.unplayableReason)
+    }
+
+    func testRejectedOneItemPlaylistLoadsWithoutAdvancingAndShowsDirectError() async throws {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        await audio.loadSampleTrack(.clickLoop)
+        let cachesDirectory = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let sampleURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
+
+        await audio.loadPlaylist(fileURLs: [sampleURL], autoPlay: true)
+
+        XCTAssertEqual(audio.localPlaylist.count, 1)
+        XCTAssertEqual(audio.localPlaylist.currentItem?.source, .file(sampleURL))
+        XCTAssertNil(audio.localPlaylist.currentItem?.unplayableReason)
+        XCTAssertNotEqual(audio.state, .playing)
+        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
+    }
+
+    func testStreamingQueuePolicyContextTransitionsBetweenSongAndPlaylist() {
+        var context = StreamingQueuePolicyContext.playlist(identity: "playlist-entry")
+
+        context = .song(identity: "song")
+        XCTAssertFalse(context.isPlaylist)
+        XCTAssertEqual(context.identity, "song")
+
+        context = .playlist(identity: "next-entry")
+        XCTAssertTrue(context.isPlaylist)
+        XCTAssertEqual(context.identity, "next-entry")
+    }
+
+    func testStreamingQueuePolicyContextClearsIdentityAndKindAfterFailure() {
+        var context = StreamingQueuePolicyContext.playlist(identity: "playlist-entry")
+
+        context.clearAfterFailure()
+
+        XCTAssertFalse(context.isPlaylist)
+        XCTAssertNil(context.identity)
     }
 
     func testStreamingControllerStartsOutsidePlaylistContextWithoutIdentity() {

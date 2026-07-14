@@ -64,6 +64,7 @@ enum SampleTrackPreset: String, CaseIterable, Identifiable {
 
 enum LocalTempoPolicyAction: Equatable {
     case keepCurrent
+    case rejectCurrent
     case advance(QueueItem)
     case exhausted
 }
@@ -373,6 +374,11 @@ final class AudioManager: ObservableObject {
     // MARK: - File Loading
 
     func loadFile(url: URL) async {
+        await loadFileWithoutDirectTempoEnforcement(url: url)
+        enforceDirectLocalTempoPolicy()
+    }
+
+    private func loadFileWithoutDirectTempoEnforcement(url: URL) async {
         trackGeneration += 1
         let gen = trackGeneration
         await loadFile(url: url, generation: gen)
@@ -486,9 +492,9 @@ final class AudioManager: ObservableObject {
         playlist: inout LocalFilePlaylist,
         allowsAutomaticAdvance: Bool
     ) -> LocalTempoPolicyAction {
-        guard allowsAutomaticAdvance, playlist.count > 1 else { return .keepCurrent }
         guard originalBPMSource != .assumedDefault else { return .keepCurrent }
         guard !tempoPlan.isPlayable else { return .keepCurrent }
+        guard allowsAutomaticAdvance, playlist.count > 1 else { return .rejectCurrent }
 
         playlist.markCurrentUnplayable(
             .rateOutOfRange(required: tempoPlan.requiredPlaybackRate)
@@ -508,7 +514,7 @@ final class AudioManager: ObservableObject {
 
         while attemptsRemaining > 0 {
             attemptsRemaining -= 1
-            await loadFile(url: url)
+            await loadFileWithoutDirectTempoEnforcement(url: url)
 
             guard localPlaylist.currentItem?.id == item.id else { return }
             guard state == .ready else { return }
@@ -522,6 +528,10 @@ final class AudioManager: ObservableObject {
                 localPlaylist = playlist
                 clearTempoPolicyError()
                 if autoPlay { play() }
+                return
+            case .rejectCurrent:
+                localPlaylist = playlist
+                enforceDirectLocalTempoPolicy()
                 return
             case .advance(let next):
                 localPlaylist = playlist
@@ -544,16 +554,20 @@ final class AudioManager: ObservableObject {
 
     private func reevaluateLocalPlaylistTempoPolicy(revision: Int) async {
         guard revision == tempoPolicyRevision else { return }
-        guard hasLoadedTrack, localPlaylist.count > 1 else { return }
+        guard hasLoadedTrack else { return }
 
         let shouldAutoPlay = state == .playing
         var playlist = localPlaylist
         switch evaluateCurrentLocalTempoPolicy(
             playlist: &playlist,
-            allowsAutomaticAdvance: true
+            allowsAutomaticAdvance: playlist.count > 1
         ) {
         case .keepCurrent:
             localPlaylist = playlist
+            clearTempoPolicyError()
+        case .rejectCurrent:
+            localPlaylist = playlist
+            enforceDirectLocalTempoPolicy()
         case .advance(let next):
             localPlaylist = playlist
             syncPlaybackEndBehavior()
@@ -570,6 +584,25 @@ final class AudioManager: ObservableObject {
             localPlaylist = playlist
             finishLocalTempoSkipCycle()
         }
+    }
+
+    private func enforceDirectLocalTempoPolicy() {
+        guard hasLoadedTrack, state != .loading, state != .error else { return }
+        guard originalBPMSource != .assumedDefault else {
+            clearTempoPolicyError()
+            return
+        }
+        guard !tempoPlan.isPlayable else {
+            clearTempoPolicyError()
+            return
+        }
+
+        if state == .playing {
+            pause()
+        } else {
+            stopMetronome()
+        }
+        errorMessage = "케이던스 범위에 맞지 않는 곡입니다"
     }
 
     private func finishLocalTempoSkipCycle() {
@@ -623,6 +656,7 @@ final class AudioManager: ObservableObject {
                 originalBPMSource = .metadata
                 applyTempoPolicy()
             }
+            enforceDirectLocalTempoPolicy()
         }
     }
 
@@ -815,6 +849,7 @@ final class AudioManager: ObservableObject {
                     }
                     applyTempoPolicy()
                 }
+                enforceDirectLocalTempoPolicy()
             }
         } catch {
             state = .error

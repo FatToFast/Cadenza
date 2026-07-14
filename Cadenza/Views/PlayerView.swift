@@ -19,9 +19,7 @@ struct PlayerView: View {
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
     @State private var seekPreviewProgress = 0.0
     @State private var isSeekingPlayback = false
-    @State private var streamingTempoSkipGuard = TempoSkipGuard()
-    @State private var streamingSkipInFlightIdentity: String?
-    @State private var streamingTempoPolicyGeneration = 0
+    @State private var streamingTempoSkipCoordinator = StreamingTempoSkipCoordinator()
     @State private var streamingSkipTask: Task<Void, Never>?
 
     var body: some View {
@@ -175,7 +173,7 @@ struct PlayerView: View {
             syncStreamingMetronome()
         }
         .onChange(of: streaming.isPlaying) { _, _ in
-            syncStreamingMetronome()
+            applyStreamingTempoAndAlignment()
         }
         .onChange(of: streaming.errorMessage) { _, message in
             if let message {
@@ -1072,7 +1070,6 @@ struct PlayerView: View {
 
     private func applyStreamingTempoAndAlignment() {
         guard streaming.hasSong else { return }
-        let identity = streaming.currentQueueIdentity
         let bpm = streaming.currentBPM
         audio.setStreamingBeatAlignment(
             bpm: bpm,
@@ -1103,23 +1100,53 @@ struct PlayerView: View {
             return
         }
 
-        if streamingSkipInFlightIdentity == identity {
-            return
-        }
-        if streamingSkipInFlightIdentity != nil {
-            streamingSkipInFlightIdentity = nil
-        }
-        guard streamingTempoSkipGuard.register(identity: identity) else {
+        let transition = streamingTempoSkipCoordinator.transitionForRejected(
+            identity: streaming.currentQueueIdentity
+        )
+        switch transition {
+        case .exhausted:
             finishStreamingTempoSkipCycle()
             return
+        case .waiting:
+            return
+        case .skip(let token):
+            startStreamingTempoSkip(token: token)
         }
+    }
 
-        streamingSkipInFlightIdentity = identity
-        let generation = streamingTempoPolicyGeneration
+    private func startStreamingTempoSkip(token: StreamingTempoSkipToken) {
         streamingSkipTask = Task {
-            let didSkip = await streaming.skipToNext(playbackRate: 1.0)
             guard !Task.isCancelled else { return }
-            guard generation == streamingTempoPolicyGeneration else { return }
+            guard streamingTempoSkipCoordinator.permitsSkip(
+                token: token,
+                currentIdentity: streaming.currentQueueIdentity
+            ) else { return }
+            guard let currentBPM = streaming.currentBPM,
+                  streaming.currentBPMSource != nil,
+                  !BPMRange.tempoPlan(
+                    targetCadence: audio.targetBPM,
+                    originalBPM: currentBPM
+                  ).isPlayable else { return }
+
+            let didSkip = await streaming.skipToNext(
+                playbackRate: 1.0,
+                expectedIdentity: token.identity,
+                validateBeforeSkip: {
+                    guard !Task.isCancelled else { return false }
+                    guard streamingTempoSkipCoordinator.permitsSkip(
+                        token: token,
+                        currentIdentity: streaming.currentQueueIdentity
+                    ) else { return false }
+                    guard let currentBPM = streaming.currentBPM,
+                          streaming.currentBPMSource != nil else { return false }
+                    return !BPMRange.tempoPlan(
+                        targetCadence: audio.targetBPM,
+                        originalBPM: currentBPM
+                    ).isPlayable
+                }
+            )
+            guard !Task.isCancelled else { return }
+            guard streamingTempoSkipCoordinator.owns(token: token) else { return }
             guard didSkip else {
                 streamingSkipTask = nil
                 streaming.clearError()
@@ -1129,12 +1156,12 @@ struct PlayerView: View {
 
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            guard generation == streamingTempoPolicyGeneration else { return }
+            guard streamingTempoSkipCoordinator.owns(token: token) else { return }
             streamingSkipTask = nil
-            if streaming.currentQueueIdentity == identity {
+            if TempoSkipGuard.normalizedIdentity(streaming.currentQueueIdentity) == token.identity {
                 finishStreamingTempoSkipCycle()
-            } else if streamingSkipInFlightIdentity == identity {
-                streamingSkipInFlightIdentity = nil
+            } else {
+                streamingTempoSkipCoordinator.clearInFlight(ifMatching: token.identity)
             }
         }
     }
@@ -1142,9 +1169,7 @@ struct PlayerView: View {
     private func resetStreamingTempoSkipCycle() {
         streamingSkipTask?.cancel()
         streamingSkipTask = nil
-        streamingTempoSkipGuard.reset()
-        streamingSkipInFlightIdentity = nil
-        streamingTempoPolicyGeneration &+= 1
+        streamingTempoSkipCoordinator.reset()
         if audio.errorMessage == "케이던스 범위에 맞는 곡이 없습니다"
             || audio.errorMessage == "케이던스 범위에 맞지 않는 곡입니다" {
             audio.clearError()
@@ -1156,8 +1181,7 @@ struct PlayerView: View {
         streaming.applyPlaybackRate(1.0)
         audio.stopExternalMetronomePlayback()
         streamingSkipTask = nil
-        streamingSkipInFlightIdentity = nil
-        streamingTempoPolicyGeneration &+= 1
+        streamingTempoSkipCoordinator.invalidate()
         audio.presentError("케이던스 범위에 맞는 곡이 없습니다")
     }
 

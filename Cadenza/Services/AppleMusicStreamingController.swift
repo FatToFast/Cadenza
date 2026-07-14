@@ -87,6 +87,35 @@ struct StreamingBPMResolver: Sendable {
     }
 }
 
+struct StreamingQueuePolicyContext: Sendable, Equatable {
+    private(set) var isPlaylist: Bool
+    private(set) var identity: String?
+
+    static let empty = StreamingQueuePolicyContext(isPlaylist: false, identity: nil)
+
+    static func song(identity: String?) -> StreamingQueuePolicyContext {
+        StreamingQueuePolicyContext(
+            isPlaylist: false,
+            identity: TempoSkipGuard.normalizedIdentity(identity)
+        )
+    }
+
+    static func playlist(identity: String?) -> StreamingQueuePolicyContext {
+        StreamingQueuePolicyContext(
+            isPlaylist: true,
+            identity: TempoSkipGuard.normalizedIdentity(identity)
+        )
+    }
+
+    mutating func replaceIdentity(_ identity: String?) {
+        self.identity = TempoSkipGuard.normalizedIdentity(identity)
+    }
+
+    mutating func clearAfterFailure() {
+        self = .empty
+    }
+}
+
 @MainActor
 final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var currentSong: Song?
@@ -121,6 +150,8 @@ final class AppleMusicStreamingController: ObservableObject {
     private var bpmCacheByKey: [String: StreamingBPMResult] = [:]
     private var didBuildBPMCache = false
     private var desiredPlaybackRate: Float = 1.0
+    private var queuePolicyContext = StreamingQueuePolicyContext.empty
+    private var selectionGeneration = 0
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
     private let bpmOverrideStore: TrackBPMOverrideStore
 
@@ -144,29 +175,112 @@ final class AppleMusicStreamingController: ObservableObject {
         player.playbackTime
     }
 
+    private func beginExplicitSelection(
+        context: StreamingQueuePolicyContext,
+        song: Song?,
+        title: String,
+        artist: String?,
+        artworkURL: URL?
+    ) -> Int {
+        selectionGeneration &+= 1
+        let generation = selectionGeneration
+
+        player.stop()
+        queueCancellable = nil
+        stateCancellable = nil
+        nowPlayingTask?.cancel()
+        nowPlayingTask = nil
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+
+        applyQueuePolicyContext(context)
+        currentSong = song
+        currentTitle = title
+        currentArtist = artist
+        currentArtworkURL = artworkURL
+        clearResolvedBPMState()
+        isPlaying = false
+        isLoading = true
+        canShuffle = context.isPlaylist
+        canRepeat = true
+        isShuffleEnabled = false
+        isRepeatEnabled = false
+        errorMessage = nil
+        return generation
+    }
+
+    private func failExplicitSelection(generation: Int, message: String) {
+        guard generation == selectionGeneration else { return }
+
+        player.stop()
+        queueCancellable = nil
+        stateCancellable = nil
+        nowPlayingTask?.cancel()
+        nowPlayingTask = nil
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+
+        var clearedContext = queuePolicyContext
+        clearedContext.clearAfterFailure()
+        applyQueuePolicyContext(clearedContext)
+        currentSong = nil
+        currentTitle = nil
+        currentArtist = nil
+        currentArtworkURL = nil
+        clearResolvedBPMState()
+        canShuffle = false
+        canRepeat = false
+        isShuffleEnabled = false
+        isRepeatEnabled = false
+        isPlaying = false
+        isLoading = false
+        errorMessage = message
+    }
+
+    private func applyQueuePolicyContext(_ context: StreamingQueuePolicyContext) {
+        queuePolicyContext = context
+        currentQueueIdentity = context.identity
+        isPlaylistQueueContext = context.isPlaylist
+    }
+
+    private func clearResolvedBPMState() {
+        currentBPM = nil
+        currentBPMSource = nil
+        currentBeatOffsetSeconds = nil
+        currentBeatTimesSeconds = []
+        currentBeatAlignmentConfidence = nil
+        currentBeatSyncStatus = .needsConfirmation
+        currentBeatSyncIssue = .missingBPM
+    }
+
     func clearError() {
         errorMessage = nil
     }
 
     func play(_ song: Song, playbackRate: Double) async {
-        isLoading = true
-        errorMessage = nil
+        let generation = beginExplicitSelection(
+            context: .song(identity: storeKey(song.id.rawValue)),
+            song: song,
+            title: song.title,
+            artist: song.artistName,
+            artworkURL: song.artwork?.url(width: 600, height: 600)
+        )
 
         let status = await ensureAuthorization()
+        guard generation == selectionGeneration else { return }
         guard status == .authorized else {
-            isLoading = false
-            errorMessage = "Apple Music 스트리밍 권한이 필요합니다"
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍 권한이 필요합니다"
+            )
             return
         }
         await prepareBPMCacheIfPossible()
+        guard generation == selectionGeneration else { return }
 
         do {
-            isPlaylistQueueContext = false
-            currentSong = song
-            currentQueueIdentity = storeKey(song.id.rawValue)
-            currentTitle = song.title
-            currentArtist = song.artistName
-            currentArtworkURL = song.artwork?.url(width: 600, height: 600)
             applyResolvedBPM(bpm(for: song))
             startPreviewBPMAnalysisIfNeeded(for: song)
             canShuffle = false
@@ -177,17 +291,24 @@ final class AppleMusicStreamingController: ObservableObject {
             startPlayerObservation()
             syncCurrentEntryFromQueue()
             try await player.prepareToPlay()
+            guard generation == selectionGeneration else { return }
             applyPlaybackRate(playbackRate)
             try await player.play()
+            guard generation == selectionGeneration else { return }
             isPlaying = true
             enforcePlaybackRate(reason: "song-play-started")
             reapplyPlaybackRateAfterStartup()
         } catch {
-            errorMessage = "Apple Music 스트리밍을 시작할 수 없습니다: \(error.localizedDescription)"
-            isPlaying = false
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍을 시작할 수 없습니다: \(error.localizedDescription)"
+            )
+            return
         }
 
-        isLoading = false
+        if generation == selectionGeneration {
+            isLoading = false
+        }
     }
 
     func play(
@@ -196,26 +317,30 @@ final class AppleMusicStreamingController: ObservableObject {
         playbackRate: Double,
         preloadedEntries: [Playlist.Entry] = []
     ) async {
-        isLoading = true
-        errorMessage = nil
+        let generation = beginExplicitSelection(
+            context: .playlist(identity: queueIdentity(for: entry)),
+            song: nil,
+            title: entry.title,
+            artist: entry.artistName,
+            artworkURL: entry.artwork?.url(width: 600, height: 600)
+        )
 
         let status = await ensureAuthorization()
+        guard generation == selectionGeneration else { return }
         guard status == .authorized else {
-            isLoading = false
-            errorMessage = "Apple Music 스트리밍 권한이 필요합니다"
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍 권한이 필요합니다"
+            )
             return
         }
         await prepareBPMCacheIfPossible()
+        guard generation == selectionGeneration else { return }
         await seedBPMCacheFromPrefetchedLookups(preloadedEntries)
+        guard generation == selectionGeneration else { return }
         startPlaylistBPMPreload(preloadedEntries)
 
         do {
-            isPlaylistQueueContext = true
-            currentSong = nil
-            currentQueueIdentity = queueIdentity(for: entry)
-            currentTitle = entry.title
-            currentArtist = entry.artistName
-            currentArtworkURL = entry.artwork?.url(width: 600, height: 600)
             applyResolvedBPM(bpm(for: entry))
             startPreviewBPMAnalysisIfNeeded(for: entry)
             canShuffle = true
@@ -226,17 +351,24 @@ final class AppleMusicStreamingController: ObservableObject {
             startPlayerObservation()
             syncCurrentEntryFromQueue()
             try await player.prepareToPlay()
+            guard generation == selectionGeneration else { return }
             applyPlaybackRate(playbackRate)
             try await player.play()
+            guard generation == selectionGeneration else { return }
             isPlaying = true
             enforcePlaybackRate(reason: "playlist-play-started")
             reapplyPlaybackRateAfterStartup()
         } catch {
-            errorMessage = "Apple Music 플레이리스트를 재생할 수 없습니다: \(error.localizedDescription)"
-            isPlaying = false
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 플레이리스트를 재생할 수 없습니다: \(error.localizedDescription)"
+            )
+            return
         }
 
-        isLoading = false
+        if generation == selectionGeneration {
+            isLoading = false
+        }
     }
 
     private func seedBPMCacheFromPrefetchedLookups(_ entries: [Playlist.Entry]) async {
@@ -358,12 +490,26 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     @discardableResult
-    func skipToNext(playbackRate: Double) async -> Bool {
-        await skip(direction: .next, playbackRate: playbackRate)
+    func skipToNext(
+        playbackRate: Double,
+        expectedIdentity: String? = nil,
+        validateBeforeSkip: @MainActor () -> Bool = { true }
+    ) async -> Bool {
+        await skip(
+            direction: .next,
+            playbackRate: playbackRate,
+            expectedIdentity: expectedIdentity,
+            validateBeforeSkip: validateBeforeSkip
+        )
     }
 
     func skipToPrevious(playbackRate: Double) async {
-        _ = await skip(direction: .previous, playbackRate: playbackRate)
+        _ = await skip(
+            direction: .previous,
+            playbackRate: playbackRate,
+            expectedIdentity: nil,
+            validateBeforeSkip: { true }
+        )
     }
 
     func toggleShuffle() {
@@ -377,23 +523,18 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     func stop() {
+        selectionGeneration &+= 1
         player.stop()
         queueCancellable = nil
         stateCancellable = nil
         nowPlayingTask?.cancel()
         nowPlayingTask = nil
         currentSong = nil
-        currentQueueIdentity = nil
+        applyQueuePolicyContext(.empty)
         currentTitle = nil
         currentArtist = nil
         currentArtworkURL = nil
-        currentBPM = nil
-        currentBPMSource = nil
-        currentBeatOffsetSeconds = nil
-        currentBeatTimesSeconds = []
-        currentBeatAlignmentConfidence = nil
-        currentBeatSyncStatus = .needsConfirmation
-        currentBeatSyncIssue = .missingBPM
+        clearResolvedBPMState()
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = nil
         activePreviewAnalysisKey = nil
@@ -403,7 +544,6 @@ final class AppleMusicStreamingController: ObservableObject {
         setRepeatEnabled(false)
         isPlaying = false
         isLoading = false
-        isPlaylistQueueContext = false
     }
 
     func pause() {
@@ -469,8 +609,20 @@ final class AppleMusicStreamingController: ObservableObject {
         case previous
     }
 
-    private func skip(direction: SkipDirection, playbackRate: Double) async -> Bool {
+    private func skip(
+        direction: SkipDirection,
+        playbackRate: Double,
+        expectedIdentity: String?,
+        validateBeforeSkip: @MainActor () -> Bool
+    ) async -> Bool {
         guard currentTitle != nil else { return false }
+        if let expectedIdentity {
+            guard let expectedIdentity = TempoSkipGuard.normalizedIdentity(expectedIdentity),
+                  TempoSkipGuard.normalizedIdentity(currentQueueIdentity) == expectedIdentity else {
+                return false
+            }
+        }
+        guard validateBeforeSkip() else { return false }
 
         do {
             switch direction {
@@ -495,31 +647,35 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func startPlayerObservation() {
         nowPlayingTask?.cancel()
+        let generation = selectionGeneration
 
         queueCancellable = player.queue.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 await Task.yield()
-                self?.syncCurrentEntryFromQueue()
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncCurrentEntryFromQueue()
             }
         }
 
         stateCancellable = player.state.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 await Task.yield()
-                self?.syncPlaybackStatus()
-                self?.syncShuffleStatus()
-                self?.syncRepeatStatus()
-                self?.syncCurrentEntryFromQueue()
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncPlaybackStatus()
+                self.syncShuffleStatus()
+                self.syncRepeatStatus()
+                self.syncCurrentEntryFromQueue()
             }
         }
 
         nowPlayingTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                self?.syncPlaybackStatus()
-                self?.syncShuffleStatus()
-                self?.syncRepeatStatus()
-                self?.syncCurrentEntryFromQueue()
-                self?.enforcePlaybackRateIfPlaying(reason: "poll")
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncPlaybackStatus()
+                self.syncShuffleStatus()
+                self.syncRepeatStatus()
+                self.syncCurrentEntryFromQueue()
+                self.enforcePlaybackRateIfPlaying(reason: "poll")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -527,7 +683,9 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func syncCurrentEntryFromQueue() {
         guard let entry = player.queue.currentEntry else { return }
-        currentQueueIdentity = queueIdentity(for: entry)
+        var context = queuePolicyContext
+        context.replaceIdentity(queueIdentity(for: entry))
+        applyQueuePolicyContext(context)
         currentTitle = entry.title
         currentArtist = artistName(for: entry) ?? entry.subtitle
         currentArtworkURL = artworkURL(for: entry)

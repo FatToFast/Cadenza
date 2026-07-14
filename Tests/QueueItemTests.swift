@@ -232,6 +232,37 @@ final class QueueItemTests: XCTestCase {
         XCTAssertFalse(guardState.register(identity: ""))
         XCTAssertFalse(guardState.register(identity: "   \n"))
     }
+
+    func testStreamingTempoSkipCoordinatorTerminatesInvalidAndDuplicateIdentities() throws {
+        var coordinator = StreamingTempoSkipCoordinator()
+
+        XCTAssertEqual(coordinator.transitionForRejected(identity: nil), .exhausted)
+        XCTAssertEqual(coordinator.transitionForRejected(identity: "  \n"), .exhausted)
+
+        let first = coordinator.transitionForRejected(identity: " song-a ")
+        guard case .skip(let token) = first else {
+            return XCTFail("Expected first valid identity to request a skip")
+        }
+        XCTAssertEqual(token.identity, "song-a")
+        coordinator.clearInFlight(ifMatching: token.identity)
+
+        XCTAssertEqual(coordinator.transitionForRejected(identity: "song-a"), .exhausted)
+    }
+
+    func testStreamingTempoSkipCoordinatorBlocksStaleGenerationAndIdentity() throws {
+        var coordinator = StreamingTempoSkipCoordinator()
+        let transition = coordinator.transitionForRejected(identity: "song-a")
+        guard case .skip(let token) = transition else {
+            return XCTFail("Expected a skip token")
+        }
+
+        XCTAssertTrue(coordinator.permitsSkip(token: token, currentIdentity: "song-a"))
+        XCTAssertFalse(coordinator.permitsSkip(token: token, currentIdentity: "song-b"))
+
+        coordinator.reset()
+
+        XCTAssertFalse(coordinator.permitsSkip(token: token, currentIdentity: "song-a"))
+    }
 }
 
 private struct FixedRandomNumberGenerator: RandomNumberGenerator {
