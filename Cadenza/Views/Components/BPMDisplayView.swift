@@ -32,7 +32,7 @@ struct BPMDisplayView: View {
             Spacer().frame(height: 12)
 
             HStack(spacing: 8) {
-                Text("원곡 \(roundedText(originalBPM)) BPM")
+                Text(originalTempoText)
                     .font(.cadenzaMonoValue)
                     .foregroundColor(.cadenzaTextTertiary)
 
@@ -72,6 +72,10 @@ struct BPMDisplayView: View {
     }
 
     private var modeText: String {
+        guard originalBPMSource != .assumedDefault else {
+            return "원곡 BPM 확인 필요"
+        }
+
         switch tempoPlan.mode {
         case .originalSpeed:
             return "원곡 속도"
@@ -90,20 +94,32 @@ struct BPMDisplayView: View {
 
     private var accessibilitySummary: String {
         let baseAndRange = "기준 \(roundedText(tempoPlan.baseCadence)) SPM, 허용 \(roundedText(tempoPlan.allowedCadence.lowerBound))에서 \(roundedText(tempoPlan.allowedCadence.upperBound)) SPM"
-        let original = "원곡 \(roundedText(originalBPM)) BPM, \(originalBPMSource.badgeText)"
         let fit = meaningfulCadenceFit.map { ", 러닝 적합도 \($0.badgeText)" } ?? ""
 
+        guard originalBPMSource != .assumedDefault else {
+            return "\(baseAndRange). 원곡 BPM 확인 필요\(fit)"
+        }
+
+        let original = "원곡 \(roundedText(originalBPM)) BPM, \(originalBPMSource.badgeText)"
         if tempoPlan.mode == .rejected {
             return "재생 불가. \(baseAndRange). \(original). \(modeText)\(fit)"
         }
         return "실제 케이던스 \(roundedText(tempoPlan.effectiveCadence)) SPM. \(baseAndRange). \(original). \(modeText)\(fit)"
     }
 
+    private var originalTempoText: String {
+        guard originalBPMSource != .assumedDefault else {
+            return "원곡 BPM 미확인"
+        }
+        return "원곡 \(roundedText(originalBPM)) BPM"
+    }
+
     private func roundedText(_ value: Double) -> String {
         guard value.isFinite,
-              value >= Double(Int.min),
-              value <= Double(Int.max) else { return "확인 불가" }
-        return String(Int(value.rounded()))
+              let roundedValue = Int(exactly: value.rounded()) else {
+            return "확인 불가"
+        }
+        return String(roundedValue)
     }
 
     private func isValidRate(_ rate: Double) -> Bool {
