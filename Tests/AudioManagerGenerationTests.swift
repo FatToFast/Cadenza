@@ -465,6 +465,101 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertTrue(audio.hasBeatAlignmentAnalysis)
     }
 
+    func testPreparingForStreamingInvalidatesSuspendedDirectLocalLoad() async throws {
+        let preparer = AudioManager()
+        await preparer.loadSampleTrack(.clickLoop)
+        let cachesDirectory = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let localURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
+        let barrier = LocalLoadCommitBarrier(blockedURL: localURL)
+        let audio = AudioManager(localLoadCommitBarrier: { url in
+            await barrier.suspendIfNeeded(url: url)
+        })
+
+        let localLoad = Task { @MainActor in
+            await audio.loadFile(url: localURL)
+        }
+        await barrier.waitUntilSuspended()
+        XCTAssertEqual(audio.state, .loading)
+        XCTAssertTrue(audio.hasActiveLocalTrackResource)
+
+        audio.prepareForStreamingPlayback()
+        audio.setStreamingBeatAlignment(
+            bpm: 187,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        barrier.resume()
+        let didLoad = await localLoad.value
+
+        XCTAssertFalse(didLoad)
+        XCTAssertEqual(audio.state, .idle)
+        XCTAssertFalse(audio.hasLoadedTrack)
+        XCTAssertFalse(audio.hasActiveLocalTrackResource)
+        XCTAssertEqual(audio.originalBPM, 187, accuracy: 0.001)
+        XCTAssertEqual(audio.originalBPMSource, .metadata)
+    }
+
+    func testPreparingForStreamingCleansSuspendedPlaylistLoad() async throws {
+        let preparer = AudioManager()
+        await preparer.loadSampleTrack(.clickLoop)
+        let cachesDirectory = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let localURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
+        let barrier = LocalLoadCommitBarrier(blockedURL: localURL)
+        let audio = AudioManager(localLoadCommitBarrier: { url in
+            await barrier.suspendIfNeeded(url: url)
+        })
+
+        let playlistLoad = Task { @MainActor in
+            await audio.loadPlaylist(fileURLs: [localURL])
+        }
+        await barrier.waitUntilSuspended()
+        XCTAssertEqual(audio.state, .loading)
+        XCTAssertTrue(audio.hasActiveLocalTrackResource)
+        XCTAssertEqual(audio.localPlaylist.count, 1)
+
+        audio.prepareForStreamingPlayback()
+        barrier.resume()
+        await playlistLoad.value
+
+        XCTAssertEqual(audio.state, .idle)
+        XCTAssertFalse(audio.hasLoadedTrack)
+        XCTAssertFalse(audio.hasActiveLocalTrackResource)
+        XCTAssertTrue(audio.localPlaylist.isEmpty)
+    }
+
+    func testPreparingForStreamingPreservesCommittedPausedLocalTrack() async {
+        let suiteName = "AudioManagerGenerationTests.streaming-preserves-paused.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let audio = AudioManager(
+            bpmOverrideStore: TrackBPMOverrideStore(defaults: defaults)
+        )
+        audio.targetBPM = 180
+        await audio.loadSampleTrack(.warmupGroove)
+        audio.play()
+        audio.pause()
+        let title = audio.trackTitle
+        let bpm = audio.originalBPM
+
+        audio.prepareForStreamingPlayback()
+
+        XCTAssertEqual(audio.state, .paused)
+        XCTAssertTrue(audio.hasLoadedTrack)
+        XCTAssertTrue(audio.hasActiveLocalTrackResource)
+        XCTAssertEqual(audio.trackTitle, title)
+        XCTAssertEqual(audio.originalBPM, bpm, accuracy: 0.001)
+    }
+
     func testStreamingControllerStartsOutsidePlaylistContextWithoutIdentity() {
         let streaming = AppleMusicStreamingController()
 

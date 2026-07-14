@@ -972,7 +972,7 @@ struct PlayerView: View {
     private func playAppleMusicStream(_ song: Song) {
         audio.clearError()
         resetStreamingTempoSkipCycle()
-        audio.clearLocalPlaylist()
+        audio.prepareForStreamingPlayback()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
             audio.pause()
@@ -986,7 +986,7 @@ struct PlayerView: View {
     private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry, entries: [Playlist.Entry]) {
         audio.clearError()
         resetStreamingTempoSkipCycle()
-        audio.clearLocalPlaylist()
+        audio.prepareForStreamingPlayback()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
             audio.pause()

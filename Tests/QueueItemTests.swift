@@ -292,6 +292,38 @@ final class QueueItemTests: XCTestCase {
             snapshot.isCurrent(selectionGeneration: 7, currentIdentity: "song-b")
         )
     }
+
+    func testStreamingPlayCompletionStopsStalePlaybackWithoutCommittingState() {
+        var stopCount = 0
+        var commitCount = 0
+
+        let didCommit = StreamingPlayCompletionGuard.commitIfCurrent(
+            startedGeneration: 4,
+            currentGeneration: 5,
+            stopStalePlayback: { stopCount += 1 },
+            commitCurrentPlayback: { commitCount += 1 }
+        )
+
+        XCTAssertFalse(didCommit)
+        XCTAssertEqual(stopCount, 1)
+        XCTAssertEqual(commitCount, 0)
+    }
+
+    func testStreamingPlayCompletionCommitsCurrentPlaybackWithoutStopping() {
+        var stopCount = 0
+        var commitCount = 0
+
+        let didCommit = StreamingPlayCompletionGuard.commitIfCurrent(
+            startedGeneration: 5,
+            currentGeneration: 5,
+            stopStalePlayback: { stopCount += 1 },
+            commitCurrentPlayback: { commitCount += 1 }
+        )
+
+        XCTAssertTrue(didCommit)
+        XCTAssertEqual(stopCount, 0)
+        XCTAssertEqual(commitCount, 1)
+    }
 }
 
 private struct FixedRandomNumberGenerator: RandomNumberGenerator {

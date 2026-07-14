@@ -153,6 +153,9 @@ final class AudioManager: ObservableObject {
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
     var hasLoadedTrack: Bool { audioFile != nil }
+    var hasActiveLocalTrackResource: Bool {
+        currentTrackURL != nil || currentAccessedURL != nil
+    }
     var canStartPlayback: Bool {
         if audioFile != nil {
             return isCurrentTempoPlayable
@@ -429,6 +432,36 @@ final class AudioManager: ObservableObject {
     func clearLocalPlaylist() {
         localPlaylist = LocalFilePlaylist()
         syncPlaybackEndBehavior()
+    }
+
+    /// 스트리밍 소스로 전환하기 전에 진행 중인 로컬 로드만 폐기한다.
+    /// 이미 커밋된 로컬 트랙은 보존해 소스 전환 자체가 불필요하게 파괴적이지 않게 한다.
+    func prepareForStreamingPlayback() {
+        pendingPresetBPMHint = nil
+        localPlaylist = LocalFilePlaylist()
+        syncPlaybackEndBehavior()
+
+        guard state == .loading else { return }
+        trackGeneration &+= 1
+
+        playerNode.stop()
+        playerNode.reset()
+        isExternalMetronomePlaybackActive = false
+        stopMetronome()
+        hasScheduledPlayback = false
+        isScheduling = false
+        scheduledLoopStartFrame = 0
+        currentScheduledStartFrame = 0
+        stopProgressUpdates()
+        if engine.isRunning {
+            engine.stop()
+        }
+
+        releaseCurrentURL()
+        currentTrackURL = nil
+        currentTrackOverrideKey = nil
+        audioFile = nil
+        state = .idle
     }
 
     func nextLocalTrack() async {

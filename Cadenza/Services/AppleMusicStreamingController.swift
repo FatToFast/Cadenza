@@ -326,10 +326,16 @@ final class AppleMusicStreamingController: ObservableObject {
             guard generation == selectionGeneration else { return }
             applyPlaybackRate(playbackRate)
             try await player.play()
-            guard generation == selectionGeneration else { return }
-            isPlaying = true
-            enforcePlaybackRate(reason: "song-play-started")
-            reapplyPlaybackRateAfterStartup()
+            guard StreamingPlayCompletionGuard.commitIfCurrent(
+                startedGeneration: generation,
+                currentGeneration: selectionGeneration,
+                stopStalePlayback: { player.stop() },
+                commitCurrentPlayback: {
+                    isPlaying = true
+                    enforcePlaybackRate(reason: "song-play-started")
+                    reapplyPlaybackRateAfterStartup()
+                }
+            ) else { return }
         } catch {
             failExplicitSelection(
                 generation: generation,
@@ -391,10 +397,16 @@ final class AppleMusicStreamingController: ObservableObject {
             guard generation == selectionGeneration else { return }
             applyPlaybackRate(playbackRate)
             try await player.play()
-            guard generation == selectionGeneration else { return }
-            isPlaying = true
-            enforcePlaybackRate(reason: "playlist-play-started")
-            reapplyPlaybackRateAfterStartup()
+            guard StreamingPlayCompletionGuard.commitIfCurrent(
+                startedGeneration: generation,
+                currentGeneration: selectionGeneration,
+                stopStalePlayback: { player.stop() },
+                commitCurrentPlayback: {
+                    isPlaying = true
+                    enforcePlaybackRate(reason: "playlist-play-started")
+                    reapplyPlaybackRateAfterStartup()
+                }
+            ) else { return }
         } catch {
             failExplicitSelection(
                 generation: generation,
@@ -510,17 +522,30 @@ final class AppleMusicStreamingController: ObservableObject {
 
     func togglePlayback(playbackRate: Double) async {
         guard currentTitle != nil else { return }
+        let generation = selectionGeneration
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration, currentTitle != nil else { return }
+
         do {
             if isPlaying {
                 player.pause()
                 isPlaying = false
             } else {
                 try await player.play()
-                isPlaying = true
-                applyPlaybackRate(playbackRate)
-                reapplyPlaybackRateAfterStartup()
+                guard StreamingPlayCompletionGuard.commitIfCurrent(
+                    startedGeneration: generation,
+                    currentGeneration: selectionGeneration,
+                    stopStalePlayback: { player.stop() },
+                    commitCurrentPlayback: {
+                        isPlaying = true
+                        applyPlaybackRate(playbackRate)
+                        reapplyPlaybackRateAfterStartup()
+                    }
+                ) else { return }
             }
         } catch {
+            guard generation == selectionGeneration else { return }
             errorMessage = "Apple Music 재생 상태를 변경할 수 없습니다"
             isPlaying = false
         }

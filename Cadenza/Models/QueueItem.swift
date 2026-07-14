@@ -284,6 +284,24 @@ struct StreamingQueueCommandSnapshot: Sendable, Equatable {
     }
 }
 
+struct StreamingPlayCompletionGuard {
+    @discardableResult
+    static func commitIfCurrent(
+        startedGeneration: Int,
+        currentGeneration: Int,
+        stopStalePlayback: () -> Void,
+        commitCurrentPlayback: () -> Void
+    ) -> Bool {
+        guard startedGeneration == currentGeneration else {
+            stopStalePlayback()
+            return false
+        }
+
+        commitCurrentPlayback()
+        return true
+    }
+}
+
 private extension QueueItem {
     static func localFile(url: URL, index: Int) -> QueueItem {
         let standardizedURL = url.standardizedFileURL
