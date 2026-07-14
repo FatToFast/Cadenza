@@ -290,10 +290,38 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(mt3, 175, accuracy: 0.0001)
         XCTAssertEqual(mt3 / 175, 1.0, accuracy: 0.0001)
 
-        // 원곡 60 + 케이던스 220 → 목표 55, 배속 ≈ 0.9167 (내려서 1.0에 근접)
+        // 원곡 60 + 케이던스 220 → 목표 110 (55는 원곡보다 느려져 제외), 배속 ≈ 1.8333
         let mt4 = BPMRange.foldedMusicalTarget(targetCadence: 220, originalBPM: 60)
-        XCTAssertEqual(mt4, 55, accuracy: 0.0001)
-        XCTAssertEqual(mt4 / 60, 0.9167, accuracy: 0.0001)
+        XCTAssertEqual(mt4, 110, accuracy: 0.0001)
+        XCTAssertEqual(mt4 / 60, 1.8333, accuracy: 0.0001)
+    }
+
+    func testFoldedMusicalTargetNeverSlowsDownBelowOriginal() {
+        // 원곡보다 느린 재생은 러닝 불가 — 배속 >= 1.0 후보 중 최솟값을 고른다.
+        // 원곡 100 + 케이던스 180: 90(0.9x)이 1.0에 더 가깝지만 느려지므로 180(1.8x) 선택.
+        let mt1 = BPMRange.foldedMusicalTarget(targetCadence: 180, originalBPM: 100)
+        XCTAssertEqual(mt1, 180, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(mt1 / 100, 1.0)
+
+        // 원곡 120 + 케이던스 170: 85(0.708x) 대신 170(1.4167x).
+        let mt2 = BPMRange.foldedMusicalTarget(targetCadence: 170, originalBPM: 120)
+        XCTAssertEqual(mt2, 170, accuracy: 0.0001)
+
+        // 원곡 89.96 + 케이던스 180: 90은 배속 1.0004 >= 1.0이라 그대로 유효.
+        let mt3 = BPMRange.foldedMusicalTarget(targetCadence: 180, originalBPM: 89.96)
+        XCTAssertEqual(mt3, 90, accuracy: 0.0001)
+
+        // 전 범위 스모크: 어떤 조합에서도 배속 < 1.0이 나오지 않는다
+        // (케이던스 90~220, 원곡 30~300 — 상향 후보 ×4가 항상 존재).
+        for cadence in stride(from: 90.0, through: 220.0, by: 5.0) {
+            for original in stride(from: 30.0, through: 300.0, by: 5.0) {
+                let folded = BPMRange.foldedMusicalTarget(targetCadence: cadence, originalBPM: original)
+                XCTAssertGreaterThanOrEqual(
+                    folded / original, 1.0 - 1e-9,
+                    "cadence \(cadence), original \(original) → 배속 \(folded / original)"
+                )
+            }
+        }
     }
 
     func testFoldedMusicalTargetReturnsCadenceWhenOriginalBPMNonPositive() {
