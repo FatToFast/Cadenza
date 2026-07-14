@@ -86,7 +86,12 @@ final class AudioManager: ObservableObject {
     @Published private(set) var state: PlaybackState = .idle
     @Published var targetBPM: Double = BPMRange.targetDefault {
         didSet {
-            UserDefaults.standard.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
+            let normalized = Self.normalizedTargetCadence(targetBPM)
+            guard targetBPM == normalized else {
+                targetBPM = normalized
+                return
+            }
+            defaults.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
             tempoPolicyRevision += 1
             var playlist = localPlaylist
             playlist.clearTempoUnplayableReasons()
@@ -114,10 +119,21 @@ final class AudioManager: ObservableObject {
     @Published private(set) var beatSyncIssue: BeatSyncReliabilityIssue? = .missingBPM
     @Published private(set) var manualBeatOffsetNudge: TimeInterval = 0
     @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
-        didSet { handleMetronomeEnabledChange() }
+        didSet {
+            defaults.set(metronomeEnabled, forKey: Self.metronomeEnabledDefaultsKey)
+            handleMetronomeEnabledChange()
+        }
     }
     @Published var metronomeVolume: Float = MetronomeDefaults.volume {
-        didSet { metronomeNode.volume = metronomeVolume }
+        didSet {
+            let normalized = Self.normalizedMetronomeVolume(metronomeVolume)
+            guard metronomeVolume == normalized else {
+                metronomeVolume = normalized
+                return
+            }
+            defaults.set(Double(metronomeVolume), forKey: Self.metronomeVolumeDefaultsKey)
+            metronomeNode.volume = metronomeVolume
+        }
     }
 
     var tempoPlan: BPMRange.TempoPlan {
@@ -231,6 +247,7 @@ final class AudioManager: ObservableObject {
     private var currentAccessedURL: URL?
     private var currentTrackURL: URL?
     private var currentTrackOverrideKey: String?
+    private let defaults: UserDefaults
     private let bpmOverrideStore: TrackBPMOverrideStore
     private let localLoadCommitBarrier: @MainActor (URL) async -> Void
     private var isAudioSessionConfigured = false
@@ -250,21 +267,49 @@ final class AudioManager: ObservableObject {
 
     /// 러닝 케이던스(targetBPM)는 전역·스티키·영속 값이다. 곡이 바뀌어도 유지된다.
     static let targetCadenceDefaultsKey = "com.jy.cadenza.targetCadence"
+    static let metronomeEnabledDefaultsKey = "com.jy.cadenza.metronomeEnabled"
+    static let metronomeVolumeDefaultsKey = "com.jy.cadenza.metronomeVolume"
 
     init(
+        defaults: UserDefaults = .standard,
         bpmOverrideStore: TrackBPMOverrideStore = .shared,
         localLoadCommitBarrier: @escaping @MainActor (URL) async -> Void = { _ in }
     ) {
+        self.defaults = defaults
         self.bpmOverrideStore = bpmOverrideStore
         self.localLoadCommitBarrier = localLoadCommitBarrier
         // init 내 대입은 didSet을 부르지 않으므로 초기 로드는 안전(재저장 루프 없음).
-        let storedCadence = UserDefaults.standard.double(forKey: Self.targetCadenceDefaultsKey)
-        if storedCadence >= BPMRange.targetMin, storedCadence <= BPMRange.targetMax {
-            targetBPM = storedCadence
+        if defaults.object(forKey: Self.targetCadenceDefaultsKey) != nil {
+            targetBPM = Self.normalizedTargetCadence(
+                defaults.double(forKey: Self.targetCadenceDefaultsKey)
+            )
+        }
+        if defaults.object(forKey: Self.metronomeEnabledDefaultsKey) != nil {
+            metronomeEnabled = defaults.bool(forKey: Self.metronomeEnabledDefaultsKey)
+        }
+        if defaults.object(forKey: Self.metronomeVolumeDefaultsKey) != nil {
+            metronomeVolume = Self.normalizedStoredMetronomeVolume(
+                defaults.double(forKey: Self.metronomeVolumeDefaultsKey)
+            )
         }
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
+    }
+
+    private static func normalizedTargetCadence(_ value: Double) -> Double {
+        guard value.isFinite else { return BPMRange.targetDefault }
+        return min(max(value, BPMRange.targetMin), BPMRange.targetMax)
+    }
+
+    private static func normalizedMetronomeVolume(_ value: Float) -> Float {
+        guard value.isFinite else { return MetronomeDefaults.volume }
+        return min(max(value, 0), 1)
+    }
+
+    private static func normalizedStoredMetronomeVolume(_ value: Double) -> Float {
+        guard value.isFinite else { return MetronomeDefaults.volume }
+        return Float(min(max(value, 0), 1))
     }
 
     deinit {

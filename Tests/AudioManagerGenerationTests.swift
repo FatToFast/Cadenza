@@ -6,6 +6,84 @@ import UIKit
 
 @MainActor
 final class AudioManagerGenerationTests: XCTestCase {
+    func testAudioPreferencesPersistAcrossManagerInstances() {
+        let suiteName = "AudioManagerPreferencesTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = AudioManager(defaults: defaults)
+        first.targetBPM = 175
+        first.metronomeEnabled = false
+        first.metronomeVolume = 0.35
+
+        let second = AudioManager(defaults: defaults)
+
+        XCTAssertEqual(second.targetBPM, 175)
+        XCTAssertFalse(second.metronomeEnabled)
+        XCTAssertEqual(second.metronomeVolume, 0.35, accuracy: 0.001)
+    }
+
+    func testMissingAudioPreferencesUseDefaults() {
+        let suiteName = "AudioManagerPreferencesTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let audio = AudioManager(defaults: defaults)
+
+        XCTAssertEqual(audio.targetBPM, BPMRange.targetDefault)
+        XCTAssertEqual(audio.metronomeEnabled, MetronomeDefaults.enabled)
+        XCTAssertEqual(audio.metronomeVolume, MetronomeDefaults.volume, accuracy: 0.001)
+    }
+
+    func testInvalidStoredAudioPreferencesAreNormalized() {
+        let suiteName = "AudioManagerPreferencesTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(130.0, forKey: AudioManager.targetCadenceDefaultsKey)
+        defaults.set(2.0, forKey: AudioManager.metronomeVolumeDefaultsKey)
+        var audio = AudioManager(defaults: defaults)
+        XCTAssertEqual(audio.targetBPM, BPMRange.targetMin)
+        XCTAssertEqual(audio.metronomeVolume, 1, accuracy: 0.001)
+
+        defaults.set(230.0, forKey: AudioManager.targetCadenceDefaultsKey)
+        defaults.set(-0.5, forKey: AudioManager.metronomeVolumeDefaultsKey)
+        audio = AudioManager(defaults: defaults)
+        XCTAssertEqual(audio.targetBPM, BPMRange.targetMax)
+        XCTAssertEqual(audio.metronomeVolume, 0, accuracy: 0.001)
+
+        defaults.set(Double.nan, forKey: AudioManager.targetCadenceDefaultsKey)
+        defaults.set(Double.nan, forKey: AudioManager.metronomeVolumeDefaultsKey)
+        audio = AudioManager(defaults: defaults)
+        XCTAssertEqual(audio.targetBPM, BPMRange.targetDefault)
+        XCTAssertEqual(audio.metronomeVolume, MetronomeDefaults.volume, accuracy: 0.001)
+
+        defaults.set(Double.greatestFiniteMagnitude, forKey: AudioManager.metronomeVolumeDefaultsKey)
+        audio = AudioManager(defaults: defaults)
+        XCTAssertEqual(audio.metronomeVolume, 1, accuracy: 0.001)
+    }
+
+    func testInvalidAssignedAudioPreferencesAreNormalizedAndPersisted() {
+        let suiteName = "AudioManagerPreferencesTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = AudioManager(defaults: defaults)
+        first.targetBPM = 130
+        first.metronomeVolume = 1.5
+        XCTAssertEqual(first.targetBPM, BPMRange.targetMin)
+        XCTAssertEqual(first.metronomeVolume, 1, accuracy: 0.001)
+
+        first.targetBPM = .nan
+        first.metronomeVolume = .nan
+        XCTAssertEqual(first.targetBPM, BPMRange.targetDefault)
+        XCTAssertEqual(first.metronomeVolume, MetronomeDefaults.volume, accuracy: 0.001)
+
+        let second = AudioManager(defaults: defaults)
+        XCTAssertEqual(second.targetBPM, BPMRange.targetDefault)
+        XCTAssertEqual(second.metronomeVolume, MetronomeDefaults.volume, accuracy: 0.001)
+    }
+
     func testPlayerViewDoesNotSnapDetectedOriginalBPMToCadenceOctave() async {
         let audio = AudioManager()
         audio.targetBPM = 180
