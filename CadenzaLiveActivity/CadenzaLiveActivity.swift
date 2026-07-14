@@ -9,7 +9,10 @@ struct CadenzaLiveActivity: Widget {
             LiveActivityExpandedView(state: context.state)
                 .padding(16)
                 .background(
-                    BeatBreathingHalo(bpm: context.state.bpm, isActive: context.state.isPlaying)
+                    BeatBreathingHalo(
+                        cadence: ActivityDisplay.effectiveCadence(context.state),
+                        isActive: context.state.isPlaying
+                    )
                 )
                 .activityBackgroundTint(Color(hex: 0x15151C).opacity(0.92))
                 .activitySystemActionForegroundColor(.cadenzaTextPrimary)
@@ -19,7 +22,7 @@ struct CadenzaLiveActivity: Widget {
                     artwork(state: context.state, size: 56)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    bpmReadout(state: context.state)
+                    cadenceReadout(state: context.state)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     titleStack(state: context.state)
@@ -30,9 +33,11 @@ struct CadenzaLiveActivity: Widget {
             } compactLeading: {
                 artwork(state: context.state, size: 22)
             } compactTrailing: {
-                Text("\(context.state.bpm)")
+                Text("\(ActivityDisplay.effectiveCadence(context.state))")
                     .font(.cadenzaMonoPill)
                     .foregroundColor(.cadenzaAccent)
+                    .accessibilityLabel("실제 케이던스")
+                    .accessibilityValue("\(ActivityDisplay.effectiveCadence(context.state)) SPM")
             } minimal: {
                 artwork(state: context.state, size: 18)
             }
@@ -60,9 +65,9 @@ struct CadenzaLiveActivity: Widget {
     }
 
     @ViewBuilder
-    private func bpmReadout(state: CadenzaActivityState) -> some View {
+    private func cadenceReadout(state: CadenzaActivityState) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
-            Text("\(state.bpm)")
+            Text("\(ActivityDisplay.effectiveCadence(state))")
                 .font(.system(size: 28, weight: .medium, design: .monospaced))
                 .foregroundColor(.cadenzaTextPrimary)
             Text("SPM")
@@ -70,6 +75,9 @@ struct CadenzaLiveActivity: Widget {
                 .tracking(1.5)
                 .foregroundColor(.cadenzaTextSecondary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("실제 케이던스")
+        .accessibilityValue("\(ActivityDisplay.effectiveCadence(state)) SPM")
     }
 
     @ViewBuilder
@@ -92,27 +100,20 @@ struct CadenzaLiveActivity: Widget {
     @ViewBuilder
     private func progressLine(state: CadenzaActivityState) -> some View {
         VStack(spacing: 4) {
-            ProgressView(value: progressFraction(state: state))
+            ProgressView(value: ActivityDisplay.progressFraction(state))
                 .tint(.cadenzaAccent)
             HStack {
-                Text(formatted(state.elapsed))
+                Text(ActivityDisplay.formattedTime(state.elapsed))
                 Spacer()
-                Text(formatted(state.duration))
+                Text("기준 \(ActivityDisplay.baseCadence(state))")
+                Spacer()
+                Text(ActivityDisplay.formattedTime(state.duration))
             }
             .font(.cadenzaMonoTimecode)
             .foregroundColor(.cadenzaTextTertiary)
         }
     }
 
-    private func progressFraction(state: CadenzaActivityState) -> Double {
-        guard state.duration > 0 else { return 0 }
-        return min(max(state.elapsed / state.duration, 0), 1)
-    }
-
-    private func formatted(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded(.down)))
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 }
 
 private struct LiveActivityExpandedView: View {
@@ -138,7 +139,7 @@ private struct LiveActivityExpandedView: View {
                     }
                     Spacer()
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(state.bpm)")
+                        Text("\(ActivityDisplay.effectiveCadence(state))")
                             .font(.system(size: 24, weight: .medium, design: .monospaced))
                             .foregroundColor(.cadenzaTextPrimary)
                         Text("SPM")
@@ -146,17 +147,20 @@ private struct LiveActivityExpandedView: View {
                             .tracking(1.5)
                             .foregroundColor(.cadenzaTextSecondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("실제 케이던스")
+                    .accessibilityValue("\(ActivityDisplay.effectiveCadence(state)) SPM")
                 }
 
-                ProgressView(value: progressFraction)
+                ProgressView(value: ActivityDisplay.progressFraction(state))
                     .tint(.cadenzaAccent)
 
                 HStack {
-                    Text(formatted(state.elapsed))
+                    Text(ActivityDisplay.formattedTime(state.elapsed))
                     Spacer()
-                    Text("TGT \(state.targetBPM)")
+                    Text(ActivityDisplay.supportingCadenceText(state))
                     Spacer()
-                    Text(formatted(state.duration))
+                    Text(ActivityDisplay.formattedTime(state.duration))
                 }
                 .font(.cadenzaMonoTimecode)
                 .foregroundColor(.cadenzaTextTertiary)
@@ -183,27 +187,18 @@ private struct LiveActivityExpandedView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private var progressFraction: Double {
-        guard state.duration > 0 else { return 0 }
-        return min(max(state.elapsed / state.duration, 0), 1)
-    }
-
-    private func formatted(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded(.down)))
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 }
 
-/// 카드 외곽에 BPM에 맞춰 시안 글로우가 펄싱하는 호흡 레이어.
+/// 카드 외곽에 실제 케이던스에 맞춰 시안 글로우가 펄싱하는 호흡 레이어.
 /// 정지 시 0으로 고정. Reduce Motion이면 정적 약한 글로우만.
 private struct BeatBreathingHalo: View {
-    let bpm: Int
+    let cadence: Int
     let isActive: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let beatInterval = bpm > 0 ? 60.0 / Double(bpm) : 1.0
+        let beatInterval = cadence > 0 ? 60.0 / Double(cadence) : 1.0
         return Group {
             if !isActive {
                 Color.clear
@@ -223,5 +218,37 @@ private struct BeatBreathingHalo: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+private enum ActivityDisplay {
+    static func effectiveCadence(_ state: CadenzaActivityState) -> Int {
+        max(0, state.effectiveCadence)
+    }
+
+    static func baseCadence(_ state: CadenzaActivityState) -> Int {
+        max(0, state.baseCadence)
+    }
+
+    static func supportingCadenceText(_ state: CadenzaActivityState) -> String {
+        let base = "기준 \(baseCadence(state))"
+        guard state.originalBPM > 0 else { return base }
+        return "\(base) · 원곡 \(state.originalBPM) BPM"
+    }
+
+    static func progressFraction(_ state: CadenzaActivityState) -> Double {
+        guard state.elapsed.isFinite,
+              state.duration.isFinite,
+              state.duration > 0 else { return 0 }
+        return min(max(state.elapsed / state.duration, 0), 1)
+    }
+
+    static func formattedTime(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite,
+              seconds >= 0,
+              let total = Int(exactly: seconds.rounded(.down)) else {
+            return "0:00"
+        }
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

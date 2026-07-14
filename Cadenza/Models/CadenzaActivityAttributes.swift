@@ -12,8 +12,13 @@ struct CadenzaActivityAttributes: ActivityAttributes {
 struct CadenzaActivityState: Codable, Hashable {
     var title: String
     var artist: String?
-    var bpm: Int
-    var targetBPM: Int
+    /// 현재 곡과 재생속도를 반영한 실제 발걸음 케이던스(SPM).
+    var effectiveCadence: Int
+    /// 사용자가 조절하는 허용 구간의 하한 케이던스(SPM).
+    var baseCadence: Int
+    /// 분석·메타데이터에서 얻은 원곡 템포(BPM). 0은 아직 확인되지 않았다는 뜻이며,
+    /// 케이던스와 섞어 표시하지 않는다.
+    var originalBPM: Int
     var elapsed: TimeInterval
     var duration: TimeInterval
     var isPlaying: Bool
