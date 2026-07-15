@@ -592,7 +592,8 @@ final class AudioManager: ObservableObject {
         artist: String?,
         bpmHint: Double?
     ) async {
-        pendingPresetBPMHint = bpmHint
+        let validatedBPMHint = bpmHint.flatMap(BPMRange.validatedOriginalBPM)
+        pendingPresetBPMHint = validatedBPMHint
         let committedGeneration = await loadDirectFile(url: url)
 
         if let committedGeneration,
@@ -604,8 +605,8 @@ final class AudioManager: ObservableObject {
            state == .ready {
             trackTitle = title
             trackArtist = artist
-            if let bpmHint, originalBPMSource == .assumedDefault {
-                originalBPM = bpmHint
+            if let validatedBPMHint, originalBPMSource == .assumedDefault {
+                originalBPM = validatedBPMHint
                 _bpmFromMetadata = false
                 originalBPMSource = .metadata
                 applyTempoPolicy()

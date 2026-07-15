@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 import Combine
 import SwiftUI
 import UIKit
@@ -327,6 +328,47 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertNil(audio.errorMessage)
     }
 
+    func testResolvedTrackRejectsUnsupportedBPMHintsWithoutLeavingConfirmationFlow() async throws {
+        let localURL = try makeShortSilentAudioFile()
+
+        for bpmHint in [29.0, 301.0, .nan, .infinity] {
+            let audio = AudioManager()
+
+            await audio.loadResolvedTrack(
+                url: localURL,
+                title: "Imported Track",
+                artist: nil,
+                bpmHint: bpmHint
+            )
+
+            XCTAssertTrue(audio.hasLoadedTrack, "BPM: \(bpmHint)")
+            XCTAssertEqual(audio.originalBPMSource, .assumedDefault, "BPM: \(bpmHint)")
+            XCTAssertTrue(audio.needsOriginalBPMInput, "BPM: \(bpmHint)")
+            XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+            XCTAssertNil(audio.errorMessage, "BPM: \(bpmHint)")
+        }
+    }
+
+    func testResolvedTrackAcceptsSupportedBPMHintBoundaries() async throws {
+        let localURL = try makeShortSilentAudioFile()
+
+        for bpmHint in [30.0, 300.0] {
+            let audio = AudioManager()
+
+            await audio.loadResolvedTrack(
+                url: localURL,
+                title: "Imported Track",
+                artist: nil,
+                bpmHint: bpmHint
+            )
+
+            XCTAssertTrue(audio.hasLoadedTrack, "BPM: \(bpmHint)")
+            XCTAssertEqual(audio.originalBPM, bpmHint, accuracy: 0.0001)
+            XCTAssertEqual(audio.originalBPMSource, .metadata, "BPM: \(bpmHint)")
+            XCTAssertFalse(audio.needsOriginalBPMInput, "BPM: \(bpmHint)")
+        }
+    }
+
     func testStreamingQueuePolicyContextTransitionsBetweenSongAndPlaylist() {
         var context = StreamingQueuePolicyContext.playlist(identity: "playlist-entry")
 
@@ -597,6 +639,22 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.beatSyncIssue, .lowConfidence)
         // 새 정책: 신뢰도 낮아도 BPM은 확정된 상태이므로 균등 간격 메트로놈은 동작.
         XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
+    }
+
+    private func makeShortSilentAudioFile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Cadenza-short-silence-\(UUID().uuidString).wav")
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 256))
+        buffer.frameLength = 256
+        try file.write(from: buffer)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: url)
+        }
+        return url
     }
 }
 

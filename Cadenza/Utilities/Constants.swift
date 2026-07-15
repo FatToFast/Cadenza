@@ -37,13 +37,17 @@ enum BPMRange {
         var playbackRate: Double { isPlayable ? requiredPlaybackRate : 1.0 }
     }
 
+    static func validatedOriginalBPM(_ value: Double) -> Double? {
+        guard value.isFinite, (originalMin...originalMax).contains(value) else { return nil }
+        return value
+    }
+
     static func tempoPlan(targetCadence: Double, originalBPM: Double) -> TempoPlan {
         let normalizedTarget = targetCadence.isNaN ? targetDefault : targetCadence
         let base = min(max(normalizedTarget, targetMin), targetMax)
         let allowed = base...min(base + cadenceAllowance, targetMax)
 
-        guard originalBPM.isFinite,
-              (originalMin...originalMax).contains(originalBPM) else {
+        guard validatedOriginalBPM(originalBPM) != nil else {
             return rejectedPlan(
                 base: base,
                 allowed: allowed
