@@ -212,6 +212,11 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var isRepeatEnabled = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentQueueIdentity: String?
+    @Published private(set) var currentPlaylistName: String?
+    @Published private(set) var currentPlaylistEntries: [Playlist.Entry] = []
+    @Published private(set) var currentPlaylistEntryID: String?
+    @Published private(set) var currentPlaylistIndex: Int?
+    @Published private(set) var currentEntryOrigin: StreamingEntryOrigin = .explicitSelection
     private(set) var isPlaylistQueueContext = false
 
     private let player = ApplicationMusicPlayer.shared
@@ -227,6 +232,8 @@ final class AppleMusicStreamingController: ObservableObject {
     private var desiredPlaybackRate: Float = 1.0
     private var queuePolicyContext = StreamingQueuePolicyContext.empty
     private var selectionGeneration = 0
+    private var currentPlaylistID: String?
+    private var requestedPlaylistIndex: Int?
     private let queueMutationGate = StreamingQueueMutationGate()
     private var isQueueMutationInFlight = false
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
@@ -240,6 +247,10 @@ final class AppleMusicStreamingController: ObservableObject {
         currentTitle != nil
     }
 
+    var hasCurrentPlaylist: Bool {
+        currentPlaylistName != nil && !currentPlaylistEntries.isEmpty
+    }
+
     var title: String? {
         currentTitle
     }
@@ -250,6 +261,10 @@ final class AppleMusicStreamingController: ObservableObject {
 
     var playbackTime: TimeInterval {
         player.playbackTime
+    }
+
+    func cachedBPMValue(for entry: Playlist.Entry) -> Double? {
+        bpm(for: entry)?.bpm
     }
 
     private func beginExplicitSelection(
@@ -331,11 +346,22 @@ final class AppleMusicStreamingController: ObservableObject {
         currentBeatSyncIssue = .missingBPM
     }
 
+    private func clearCurrentPlaylistSession() {
+        currentPlaylistID = nil
+        currentPlaylistName = nil
+        currentPlaylistEntries = []
+        currentPlaylistEntryID = nil
+        currentPlaylistIndex = nil
+        requestedPlaylistIndex = nil
+        currentEntryOrigin = .explicitSelection
+    }
+
     func clearError() {
         errorMessage = nil
     }
 
     func play(_ song: Song, playbackRate: Double) async {
+        clearCurrentPlaylistSession()
         let generation = beginExplicitSelection(
             context: .song(identity: storeKey(song.id.rawValue)),
             song: song,
@@ -404,12 +430,73 @@ final class AppleMusicStreamingController: ObservableObject {
         playbackRate: Double,
         preloadedEntries: [Playlist.Entry] = []
     ) async {
+        guard let plan = StreamingPlaylistSelectionPlan.make(
+            entryIDs: preloadedEntries.map { $0.id.rawValue },
+            selectedEntryID: entry.id.rawValue
+        ) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+
+        await playPlaylistEntries(
+            playlistID: playlist.id.rawValue,
+            playlistName: playlist.name,
+            entries: preloadedEntries,
+            plan: plan,
+            playbackRate: playbackRate
+        )
+    }
+
+    func playCurrentPlaylistEntry(
+        _ entry: Playlist.Entry,
+        playbackRate: Double
+    ) async {
+        guard let playlistID = currentPlaylistID,
+              let playlistName = currentPlaylistName,
+              let plan = StreamingPlaylistSelectionPlan.make(
+                entryIDs: currentPlaylistEntries.map { $0.id.rawValue },
+                selectedEntryID: entry.id.rawValue
+              ) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+
+        await playPlaylistEntries(
+            playlistID: playlistID,
+            playlistName: playlistName,
+            entries: currentPlaylistEntries,
+            plan: plan,
+            playbackRate: playbackRate
+        )
+    }
+
+    private func playPlaylistEntries(
+        playlistID: String,
+        playlistName: String,
+        entries: [Playlist.Entry],
+        plan: StreamingPlaylistSelectionPlan,
+        playbackRate: Double
+    ) async {
+        guard entries.indices.contains(plan.selectedIndex) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+        let selectedEntry = entries[plan.selectedIndex]
+
+        currentPlaylistID = playlistID
+        currentPlaylistName = playlistName
+        currentPlaylistEntries = entries
+        currentPlaylistEntryID = selectedEntry.id.rawValue
+        currentPlaylistIndex = plan.selectedIndex
+        requestedPlaylistIndex = plan.selectedIndex
+        currentEntryOrigin = .explicitSelection
+
         let generation = beginExplicitSelection(
-            context: .playlist(identity: queueIdentity(for: entry)),
+            context: .playlist(identity: queueIdentity(for: selectedEntry)),
             song: nil,
-            title: entry.title,
-            artist: entry.artistName,
-            artworkURL: entry.artwork?.url(width: 600, height: 600)
+            title: selectedEntry.title,
+            artist: selectedEntry.artistName,
+            artworkURL: selectedEntry.artwork?.url(width: 600, height: 600)
         )
 
         await queueMutationGate.acquire()
@@ -428,22 +515,39 @@ final class AppleMusicStreamingController: ObservableObject {
         }
         await prepareBPMCacheIfPossible()
         guard generation == selectionGeneration else { return }
-        await seedBPMCacheFromPrefetchedLookups(preloadedEntries)
+        await seedBPMCacheFromPrefetchedLookups(entries)
         guard generation == selectionGeneration else { return }
-        startPlaylistBPMPreload(preloadedEntries)
+        startPlaylistBPMPreload(entries)
 
         do {
-            applyResolvedBPM(bpm(for: entry))
-            startPreviewBPMAnalysisIfNeeded(for: entry)
+            applyResolvedBPM(bpm(for: selectedEntry))
+            startPreviewBPMAnalysisIfNeeded(for: selectedEntry)
             canShuffle = true
             canRepeat = true
             setShuffleEnabled(false)
             setRepeatEnabled(false)
-            player.queue = ApplicationMusicPlayer.Queue(playlist: playlist, startingAt: entry)
-            startPlayerObservation()
-            syncCurrentEntryFromQueue()
+            let queue = ApplicationMusicPlayer.Queue(
+                for: entries,
+                startingAt: selectedEntry
+            )
+            let expectedQueueEntryID = queue.entries.indices.contains(plan.selectedIndex)
+                ? queue.entries[plan.selectedIndex].id
+                : nil
+            player.queue = queue
             try await player.prepareToPlay()
             guard generation == selectionGeneration else { return }
+            guard StreamingQueueStartVerifier.matches(
+                expectedQueueEntryID: expectedQueueEntryID,
+                actualQueueEntryID: player.queue.currentEntry?.id
+            ) else {
+                failExplicitSelection(
+                    generation: generation,
+                    message: "선택한 곡을 재생 대기열에 설정하지 못했습니다"
+                )
+                return
+            }
+            syncCurrentEntryFromQueue()
+            startPlayerObservation()
             applyPlaybackRate(playbackRate)
             try await player.play()
             guard StreamingPlayCompletionGuard.commitIfCurrent(
@@ -638,6 +742,7 @@ final class AppleMusicStreamingController: ObservableObject {
         nowPlayingTask?.cancel()
         nowPlayingTask = nil
         currentSong = nil
+        clearCurrentPlaylistSession()
         applyQueuePolicyContext(.empty)
         currentTitle = nil
         currentArtist = nil
@@ -828,6 +933,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private func syncCurrentEntryFromQueue() {
         guard !isQueueMutationInFlight else { return }
         guard let entry = player.queue.currentEntry else { return }
+        syncCurrentPlaylistPosition(from: entry)
         var context = queuePolicyContext
         context.replaceIdentity(queueIdentity(for: entry))
         applyQueuePolicyContext(context)
@@ -840,6 +946,36 @@ final class AppleMusicStreamingController: ObservableObject {
             startPreviewBPMAnalysisIfNeeded(for: entry)
         }
         enforcePlaybackRateIfPlaying(reason: "queue-sync")
+    }
+
+    private func syncCurrentPlaylistPosition(
+        from entry: MusicKit.MusicPlayer.Queue.Entry
+    ) {
+        guard isPlaylistQueueContext, !currentPlaylistEntries.isEmpty else { return }
+        let queueEntries = player.queue.entries
+        guard let queueIndex = queueEntries.firstIndex(where: { $0.id == entry.id }) else {
+            return
+        }
+        let observedIndex = queueEntries.distance(
+            from: queueEntries.startIndex,
+            to: queueIndex
+        )
+        guard currentPlaylistEntries.indices.contains(observedIndex) else { return }
+
+        let previousIndex = currentPlaylistIndex
+        if let requestedPlaylistIndex {
+            currentEntryOrigin = StreamingEntryOrigin.resolved(
+                requestedIndex: requestedPlaylistIndex,
+                previousIndex: previousIndex,
+                observedIndex: observedIndex
+            )
+            self.requestedPlaylistIndex = nil
+        } else if previousIndex != observedIndex {
+            currentEntryOrigin = .queueAdvance
+        }
+
+        currentPlaylistIndex = observedIndex
+        currentPlaylistEntryID = currentPlaylistEntries[observedIndex].id.rawValue
     }
 
     private func artworkURL(for entry: MusicKit.MusicPlayer.Queue.Entry) -> URL? {
@@ -1268,6 +1404,28 @@ final class AppleMusicStreamingController: ObservableObject {
                 title: currentSong.title,
                 artist: currentSong.artistName,
                 albumTitle: currentSong.albumTitle
+            )
+        }
+
+        if let currentPlaylistIndex,
+           currentPlaylistEntries.indices.contains(currentPlaylistIndex) {
+            let playlistEntry = currentPlaylistEntries[currentPlaylistIndex]
+            if case .song(let song)? = playlistEntry.item {
+                return (
+                    songID: song.id.rawValue,
+                    isrc: song.isrc,
+                    title: song.title,
+                    artist: song.artistName,
+                    albumTitle: song.albumTitle
+                )
+            }
+
+            return (
+                songID: playlistEntry.id.rawValue,
+                isrc: playlistEntry.isrc,
+                title: playlistEntry.title,
+                artist: playlistEntry.artistName,
+                albumTitle: playlistEntry.albumTitle
             )
         }
 
