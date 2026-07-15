@@ -14,7 +14,6 @@ struct QueueItem: Identifiable, Sendable, Equatable {
 
     enum UnplayableReason: Sendable, Equatable {
         case cloudOnly, decodingFailed, subscriptionLapsed
-        case rateOutOfRange(required: Double)
     }
 
     var analysisCacheIdentity: String {
@@ -101,6 +100,29 @@ struct LocalFilePlaylist: Sendable, Equatable {
         return currentItem
     }
 
+    mutating func markCurrentUnplayable(_ reason: QueueItem.UnplayableReason) {
+        guard let currentItem else { return }
+        updateItem(id: currentItem.id) { $0.unplayableReason = reason }
+    }
+
+    /// Advances strictly forward to the next queue item without a recorded failure.
+    /// It never wraps, so a rejected item cannot create an automatic skip cycle.
+    mutating func moveToNextPlayable() -> QueueItem? {
+        guard let currentIndex else { return nil }
+        var candidateIndex = currentIndex + 1
+        var examinedCount = 0
+
+        while items.indices.contains(candidateIndex), examinedCount < items.count {
+            examinedCount += 1
+            if items[candidateIndex].unplayableReason == nil {
+                self.currentIndex = candidateIndex
+                return items[candidateIndex]
+            }
+            candidateIndex += 1
+        }
+        return nil
+    }
+
     mutating func moveToPrevious() -> QueueItem? {
         guard canMovePrevious, let currentIndex else { return nil }
         self.currentIndex = currentIndex - 1
@@ -137,6 +159,122 @@ struct LocalFilePlaylist: Sendable, Equatable {
             items.firstIndex { $0.id == id }
         } ?? (items.isEmpty ? nil : 0)
         isShuffled = false
+    }
+
+    private mutating func updateItem(id: String, update: (inout QueueItem) -> Void) {
+        if let index = items.firstIndex(where: { $0.id == id }) {
+            update(&items[index])
+        }
+        if let index = originalItems.firstIndex(where: { $0.id == id }) {
+            update(&originalItems[index])
+        }
+    }
+}
+
+enum QueueIdentityNormalizer {
+    static func normalized(_ identity: String?) -> String? {
+        guard let identity else { return nil }
+        let normalized = identity.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+}
+
+struct StreamingTempoPolicyGate: Sendable, Equatable {
+    static func shouldEvaluate(hasSong: Bool, isLoading: Bool) -> Bool {
+        hasSong && !isLoading
+    }
+}
+
+struct StreamingPlaylistSelectionPlan: Sendable, Equatable {
+    let selectedEntryID: String
+    let selectedIndex: Int
+
+    static func make(entryIDs: [String], selectedEntryID: String) -> Self? {
+        guard let selectedIndex = entryIDs.firstIndex(of: selectedEntryID) else {
+            return nil
+        }
+        return Self(
+            selectedEntryID: selectedEntryID,
+            selectedIndex: selectedIndex
+        )
+    }
+}
+
+struct StreamingQueueStartVerifier: Sendable, Equatable {
+    static func matches(
+        expectedIndex: Int,
+        actualIndex: Int?
+    ) -> Bool {
+        expectedIndex == actualIndex
+    }
+}
+
+struct StreamingPlaylistQueuePolicy: Sendable, Equatable {
+    static func canStart(hasDetailedPlaylistContext: Bool) -> Bool {
+        hasDetailedPlaylistContext
+    }
+}
+
+enum PlayerErrorRecoveryAction: Sendable, Equatable {
+    case showCurrentStreamingPlaylist
+    case dismiss
+    case chooseLocalFile
+
+    var buttonTitle: String {
+        switch self {
+        case .showCurrentStreamingPlaylist:
+            return "목록 보기"
+        case .dismiss:
+            return "닫기"
+        case .chooseLocalFile:
+            return "다른 파일 선택"
+        }
+    }
+}
+
+struct PlayerErrorRecoveryPolicy: Sendable, Equatable {
+    static func action(
+        hasStreamingSong: Bool,
+        hasCurrentStreamingPlaylist: Bool
+    ) -> PlayerErrorRecoveryAction {
+        if hasCurrentStreamingPlaylist {
+            return .showCurrentStreamingPlaylist
+        }
+        return hasStreamingSong ? .dismiss : .chooseLocalFile
+    }
+}
+
+struct StreamingQueueCommandSnapshot: Sendable, Equatable {
+    let selectionGeneration: Int
+    let expectedIdentity: String?
+
+    init(selectionGeneration: Int, expectedIdentity: String?) {
+        self.selectionGeneration = selectionGeneration
+        self.expectedIdentity = QueueIdentityNormalizer.normalized(expectedIdentity)
+    }
+
+    func isCurrent(selectionGeneration: Int, currentIdentity: String?) -> Bool {
+        guard self.selectionGeneration == selectionGeneration else { return false }
+        guard let expectedIdentity else { return true }
+        return QueueIdentityNormalizer.normalized(currentIdentity) == expectedIdentity
+    }
+}
+
+struct StreamingPlayCompletionGuard {
+    @discardableResult
+    static func commitIfCurrent(
+        startedGeneration: Int,
+        currentGeneration: Int,
+        stopStalePlayback: () -> Void,
+        commitCurrentPlayback: () -> Void
+    ) -> Bool {
+        guard startedGeneration == currentGeneration else {
+            stopStalePlayback()
+            return false
+        }
+
+        commitCurrentPlayback()
+        return true
     }
 }
 

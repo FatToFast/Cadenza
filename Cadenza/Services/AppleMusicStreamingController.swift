@@ -13,11 +13,68 @@ struct StreamingBPMResult: Equatable, Sendable {
     let confidence: Double?
     let beatSyncStatus: BeatSyncStatus
     let beatSyncIssue: BeatSyncReliabilityIssue?
+
+    var validated: StreamingBPMResult? {
+        BPMRange.validatedOriginalBPM(bpm).map { _ in self }
+    }
 }
 
 struct StreamingBPMResolution: Equatable, Sendable {
     let result: StreamingBPMResult?
     let didAttemptGetSongBPM: Bool
+}
+
+enum StreamingBPMPreloadDecision: Equatable, Sendable {
+    case apply(StreamingBPMResult)
+    case ignore(currentResult: StreamingBPMResult?)
+
+    var nextPublishedResult: StreamingBPMResult? {
+        switch self {
+        case .apply(let result):
+            return result
+        case .ignore(let currentResult):
+            return currentResult
+        }
+    }
+
+    static func decide(
+        currentResult: StreamingBPMResult?,
+        delayedResult: StreamingBPMResult
+    ) -> Self {
+        guard let delayedResult = delayedResult.validated else {
+            return .ignore(currentResult: currentResult)
+        }
+
+        switch currentResult?.source {
+        case .analysis?, .manual?:
+            return .ignore(currentResult: currentResult)
+        default:
+            return .apply(delayedResult)
+        }
+    }
+}
+
+struct PreviewAnalysisRetryPolicy: Equatable, Sendable {
+    let maxAutomaticAttempts: Int
+    private var failureCountsByIdentity: [String: Int] = [:]
+
+    init(maxAutomaticAttempts: Int = 1) {
+        self.maxAutomaticAttempts = max(0, maxAutomaticAttempts)
+    }
+
+    func shouldAttempt(identity: String) -> Bool {
+        failureCountsByIdentity[identity, default: 0] < maxAutomaticAttempts
+    }
+
+    mutating func recordFailure(identity: String) {
+        let currentCount = failureCountsByIdentity[identity, default: 0]
+        guard currentCount < maxAutomaticAttempts else { return }
+        failureCountsByIdentity[identity] = currentCount + 1
+    }
+
+    mutating func reset(identity: String) {
+        failureCountsByIdentity.removeValue(forKey: identity)
+    }
 }
 
 struct StreamingBPMResolver: Sendable {
@@ -31,28 +88,57 @@ struct StreamingBPMResolver: Sendable {
         cachedResult: StreamingBPMResult?,
         shouldTryGetSongBPM: Bool,
         shouldTryPreviewAnalysis: Bool,
+        forcePreviewAnalysis: Bool = false,
         title: String,
         artist: String?,
         appleMusicID: String?,
         isrc: String? = nil
     ) async -> StreamingBPMResolution {
+        var externalResult: StreamingBPMResult?
         if shouldTryGetSongBPM,
            let external = await getSongBPM(title, artist, appleMusicID, isrc) {
+            externalResult = StreamingBPMResult(
+                bpm: external.bpm,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            ).validated
+        }
+
+        if !forcePreviewAnalysis, let externalResult {
             return StreamingBPMResolution(
-                result: StreamingBPMResult(
-                    bpm: external.bpm,
-                    source: .metadata,
-                    beatOffsetSeconds: nil,
-                    beatTimesSeconds: nil,
-                    confidence: nil,
-                    beatSyncStatus: .bpmOnly,
-                    beatSyncIssue: .missingBeatGrid
-                ),
-                didAttemptGetSongBPM: true
+                result: externalResult,
+                didAttemptGetSongBPM: shouldTryGetSongBPM
             )
         }
 
-        if let cachedResult {
+        if forcePreviewAnalysis,
+           shouldTryPreviewAnalysis,
+           let analysis = await previewAnalysis() {
+            if let previewResult = result(for: analysis).validated {
+                return StreamingBPMResolution(
+                    result: previewResult,
+                    didAttemptGetSongBPM: shouldTryGetSongBPM
+                )
+            }
+
+            return StreamingBPMResolution(
+                result: externalResult ?? cachedResult?.validated,
+                didAttemptGetSongBPM: shouldTryGetSongBPM
+            )
+        }
+
+        if let externalResult {
+            return StreamingBPMResolution(
+                result: externalResult,
+                didAttemptGetSongBPM: shouldTryGetSongBPM
+            )
+        }
+
+        if let cachedResult = cachedResult?.validated {
             return StreamingBPMResolution(
                 result: cachedResult,
                 didAttemptGetSongBPM: shouldTryGetSongBPM
@@ -67,23 +153,82 @@ struct StreamingBPMResolver: Sendable {
             )
         }
 
+        return StreamingBPMResolution(
+            result: result(for: analysis).validated,
+            didAttemptGetSongBPM: shouldTryGetSongBPM
+        )
+    }
+
+    private func result(for analysis: BeatAlignmentAnalysis) -> StreamingBPMResult {
         let assessment = BeatSyncReliability.assess(
             originalBPM: analysis.estimatedBPM,
             confidence: analysis.confidence,
             beatTimesSeconds: analysis.beatTimesSeconds ?? []
         )
-        return StreamingBPMResolution(
-            result: StreamingBPMResult(
-                bpm: analysis.estimatedBPM,
-                source: .analysis,
-                beatOffsetSeconds: assessment.shouldUseBeatGrid ? analysis.beatOffsetSeconds : nil,
-                beatTimesSeconds: assessment.shouldUseBeatGrid ? analysis.beatTimesSeconds : nil,
-                confidence: analysis.confidence,
-                beatSyncStatus: assessment.status,
-                beatSyncIssue: assessment.issue
-            ),
-            didAttemptGetSongBPM: shouldTryGetSongBPM
+        return StreamingBPMResult(
+            bpm: analysis.estimatedBPM,
+            source: .analysis,
+            beatOffsetSeconds: assessment.shouldUseBeatGrid ? analysis.beatOffsetSeconds : nil,
+            beatTimesSeconds: assessment.shouldUseBeatGrid ? analysis.beatTimesSeconds : nil,
+            confidence: analysis.confidence,
+            beatSyncStatus: assessment.status,
+            beatSyncIssue: assessment.issue
         )
+    }
+}
+
+struct StreamingQueuePolicyContext: Sendable, Equatable {
+    private(set) var isPlaylist: Bool
+    private(set) var identity: String?
+
+    static let empty = StreamingQueuePolicyContext(isPlaylist: false, identity: nil)
+
+    static func song(identity: String?) -> StreamingQueuePolicyContext {
+        StreamingQueuePolicyContext(
+            isPlaylist: false,
+            identity: QueueIdentityNormalizer.normalized(identity)
+        )
+    }
+
+    static func playlist(identity: String?) -> StreamingQueuePolicyContext {
+        StreamingQueuePolicyContext(
+            isPlaylist: true,
+            identity: QueueIdentityNormalizer.normalized(identity)
+        )
+    }
+
+    mutating func replaceIdentity(_ identity: String?) {
+        self.identity = QueueIdentityNormalizer.normalized(identity)
+    }
+
+    mutating func clearAfterFailure() {
+        self = .empty
+    }
+}
+
+@MainActor
+final class StreamingQueueMutationGate {
+    private var isHeld = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard isHeld else {
+            isHeld = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !waiters.isEmpty else {
+            isHeld = false
+            return
+        }
+
+        waiters.removeFirst().resume()
     }
 }
 
@@ -107,6 +252,12 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var canRepeat = false
     @Published private(set) var isRepeatEnabled = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var currentQueueIdentity: String?
+    @Published private(set) var currentPlaylistName: String?
+    @Published private(set) var currentPlaylistEntries: [Playlist.Entry] = []
+    @Published private(set) var currentPlaylistEntryID: String?
+    @Published private(set) var currentPlaylistIndex: Int?
+    private(set) var isPlaylistQueueContext = false
 
     private let player = ApplicationMusicPlayer.shared
     private var queueCancellable: AnyCancellable?
@@ -114,11 +265,16 @@ final class AppleMusicStreamingController: ObservableObject {
     private var nowPlayingTask: Task<Void, Never>?
     private var bpmAnalysisTask: Task<Void, Never>?
     private var activePreviewAnalysisKey: String?
-    private var failedPreviewAnalysisKeys: Set<String> = []
+    private var previewAnalysisRetryPolicy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
     private var getSongBPMAttemptedKeys: Set<String> = []
     private var bpmCacheByKey: [String: StreamingBPMResult] = [:]
     private var didBuildBPMCache = false
     private var desiredPlaybackRate: Float = 1.0
+    private var queuePolicyContext = StreamingQueuePolicyContext.empty
+    private var selectionGeneration = 0
+    private var currentPlaylist: Playlist?
+    private let queueMutationGate = StreamingQueueMutationGate()
+    private var isQueueMutationInFlight = false
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
     private let bpmOverrideStore: TrackBPMOverrideStore
 
@@ -128,6 +284,10 @@ final class AppleMusicStreamingController: ObservableObject {
 
     var hasSong: Bool {
         currentTitle != nil
+    }
+
+    var hasCurrentPlaylist: Bool {
+        currentPlaylistName != nil && !currentPlaylistEntries.isEmpty
     }
 
     var title: String? {
@@ -142,27 +302,129 @@ final class AppleMusicStreamingController: ObservableObject {
         player.playbackTime
     }
 
+    func cachedBPMValue(for entry: Playlist.Entry) -> Double? {
+        bpm(for: entry)?.bpm
+    }
+
+    private func beginExplicitSelection(
+        context: StreamingQueuePolicyContext,
+        song: Song?,
+        title: String,
+        artist: String?,
+        artworkURL: URL?
+    ) -> Int {
+        selectionGeneration &+= 1
+        let generation = selectionGeneration
+
+        queueCancellable = nil
+        stateCancellable = nil
+        nowPlayingTask?.cancel()
+        nowPlayingTask = nil
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+
+        applyQueuePolicyContext(context)
+        currentSong = song
+        currentTitle = title
+        currentArtist = artist
+        currentArtworkURL = artworkURL
+        clearResolvedBPMState()
+        isPlaying = false
+        isLoading = true
+        canShuffle = context.isPlaylist
+        canRepeat = true
+        isShuffleEnabled = false
+        isRepeatEnabled = false
+        errorMessage = nil
+        return generation
+    }
+
+    private func failExplicitSelection(generation: Int, message: String) {
+        guard generation == selectionGeneration else { return }
+
+        player.stop()
+        queueCancellable = nil
+        stateCancellable = nil
+        nowPlayingTask?.cancel()
+        nowPlayingTask = nil
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+
+        var clearedContext = queuePolicyContext
+        clearedContext.clearAfterFailure()
+        applyQueuePolicyContext(clearedContext)
+        currentSong = nil
+        currentTitle = nil
+        currentArtist = nil
+        currentArtworkURL = nil
+        clearResolvedBPMState()
+        canShuffle = false
+        canRepeat = false
+        isShuffleEnabled = false
+        isRepeatEnabled = false
+        isPlaying = false
+        isLoading = false
+        errorMessage = message
+    }
+
+    private func applyQueuePolicyContext(_ context: StreamingQueuePolicyContext) {
+        queuePolicyContext = context
+        currentQueueIdentity = context.identity
+        isPlaylistQueueContext = context.isPlaylist
+    }
+
+    private func clearResolvedBPMState() {
+        currentBPM = nil
+        currentBPMSource = nil
+        currentBeatOffsetSeconds = nil
+        currentBeatTimesSeconds = []
+        currentBeatAlignmentConfidence = nil
+        currentBeatSyncStatus = .needsConfirmation
+        currentBeatSyncIssue = .missingBPM
+    }
+
+    private func clearCurrentPlaylistSession() {
+        currentPlaylist = nil
+        currentPlaylistName = nil
+        currentPlaylistEntries = []
+        currentPlaylistEntryID = nil
+        currentPlaylistIndex = nil
+    }
+
     func clearError() {
         errorMessage = nil
     }
 
     func play(_ song: Song, playbackRate: Double) async {
-        isLoading = true
-        errorMessage = nil
+        clearCurrentPlaylistSession()
+        let generation = beginExplicitSelection(
+            context: .song(identity: storeKey(song.id.rawValue)),
+            song: song,
+            title: song.title,
+            artist: song.artistName,
+            artworkURL: song.artwork?.url(width: 600, height: 600)
+        )
+
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration else { return }
+        player.stop()
 
         let status = await ensureAuthorization()
+        guard generation == selectionGeneration else { return }
         guard status == .authorized else {
-            isLoading = false
-            errorMessage = "Apple Music 스트리밍 권한이 필요합니다"
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍 권한이 필요합니다"
+            )
             return
         }
         await prepareBPMCacheIfPossible()
+        guard generation == selectionGeneration else { return }
 
         do {
-            currentSong = song
-            currentTitle = song.title
-            currentArtist = song.artistName
-            currentArtworkURL = song.artwork?.url(width: 600, height: 600)
             applyResolvedBPM(bpm(for: song))
             startPreviewBPMAnalysisIfNeeded(for: song)
             canShuffle = false
@@ -173,17 +435,30 @@ final class AppleMusicStreamingController: ObservableObject {
             startPlayerObservation()
             syncCurrentEntryFromQueue()
             try await player.prepareToPlay()
+            guard generation == selectionGeneration else { return }
             applyPlaybackRate(playbackRate)
             try await player.play()
-            isPlaying = true
-            enforcePlaybackRate(reason: "song-play-started")
-            reapplyPlaybackRateAfterStartup()
+            guard StreamingPlayCompletionGuard.commitIfCurrent(
+                startedGeneration: generation,
+                currentGeneration: selectionGeneration,
+                stopStalePlayback: { player.stop() },
+                commitCurrentPlayback: {
+                    isPlaying = true
+                    enforcePlaybackRate(reason: "song-play-started")
+                    reapplyPlaybackRateAfterStartup()
+                }
+            ) else { return }
         } catch {
-            errorMessage = "Apple Music 스트리밍을 시작할 수 없습니다: \(error.localizedDescription)"
-            isPlaying = false
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍을 시작할 수 없습니다: \(error.localizedDescription)"
+            )
+            return
         }
 
-        isLoading = false
+        if generation == selectionGeneration {
+            isLoading = false
+        }
     }
 
     func play(
@@ -192,45 +467,147 @@ final class AppleMusicStreamingController: ObservableObject {
         playbackRate: Double,
         preloadedEntries: [Playlist.Entry] = []
     ) async {
-        isLoading = true
-        errorMessage = nil
+        guard let plan = StreamingPlaylistSelectionPlan.make(
+            entryIDs: preloadedEntries.map { $0.id.rawValue },
+            selectedEntryID: entry.id.rawValue
+        ) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+
+        await playPlaylistEntries(
+            playlist: playlist,
+            entries: preloadedEntries,
+            plan: plan,
+            playbackRate: playbackRate
+        )
+    }
+
+    func playCurrentPlaylistEntry(
+        _ entry: Playlist.Entry,
+        playbackRate: Double
+    ) async {
+        guard let currentPlaylist,
+              let plan = StreamingPlaylistSelectionPlan.make(
+                entryIDs: currentPlaylistEntries.map { $0.id.rawValue },
+                selectedEntryID: entry.id.rawValue
+              ) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+
+        await playPlaylistEntries(
+            playlist: currentPlaylist,
+            entries: currentPlaylistEntries,
+            plan: plan,
+            playbackRate: playbackRate
+        )
+    }
+
+    private func playPlaylistEntries(
+        playlist: Playlist,
+        entries: [Playlist.Entry],
+        plan: StreamingPlaylistSelectionPlan,
+        playbackRate: Double
+    ) async {
+        guard entries.indices.contains(plan.selectedIndex) else {
+            errorMessage = "선택한 곡을 현재 플레이리스트에서 찾을 수 없습니다"
+            return
+        }
+        let selectedEntry = entries[plan.selectedIndex]
+
+        currentPlaylist = playlist
+        currentPlaylistName = playlist.name
+        currentPlaylistEntries = entries
+        currentPlaylistEntryID = selectedEntry.id.rawValue
+        currentPlaylistIndex = plan.selectedIndex
+
+        let generation = beginExplicitSelection(
+            context: .playlist(identity: queueIdentity(for: selectedEntry)),
+            song: nil,
+            title: selectedEntry.title,
+            artist: selectedEntry.artistName,
+            artworkURL: selectedEntry.artwork?.url(width: 600, height: 600)
+        )
+
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration else { return }
+        player.stop()
 
         let status = await ensureAuthorization()
+        guard generation == selectionGeneration else { return }
         guard status == .authorized else {
-            isLoading = false
-            errorMessage = "Apple Music 스트리밍 권한이 필요합니다"
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 스트리밍 권한이 필요합니다"
+            )
             return
         }
         await prepareBPMCacheIfPossible()
-        await seedBPMCacheFromPrefetchedLookups(preloadedEntries)
-        startPlaylistBPMPreload(preloadedEntries)
+        guard generation == selectionGeneration else { return }
+        await seedBPMCacheFromPrefetchedLookups(entries)
+        guard generation == selectionGeneration else { return }
+        startPlaylistBPMPreload(entries)
 
         do {
-            currentSong = nil
-            currentTitle = entry.title
-            currentArtist = entry.artistName
-            currentArtworkURL = entry.artwork?.url(width: 600, height: 600)
-            applyResolvedBPM(bpm(for: entry))
-            startPreviewBPMAnalysisIfNeeded(for: entry)
+            applyResolvedBPM(bpm(for: selectedEntry))
+            startPreviewBPMAnalysisIfNeeded(for: selectedEntry)
             canShuffle = true
             canRepeat = true
             setShuffleEnabled(false)
             setRepeatEnabled(false)
-            player.queue = ApplicationMusicPlayer.Queue(playlist: playlist, startingAt: entry)
-            startPlayerObservation()
-            syncCurrentEntryFromQueue()
+            let queue = ApplicationMusicPlayer.Queue(
+                playlist: playlist,
+                startingAt: selectedEntry
+            )
+            player.queue = queue
             try await player.prepareToPlay()
+            guard generation == selectionGeneration else { return }
+            let preparedQueue = player.queue
+            let actualIndex = preparedQueue.currentEntry.flatMap { currentEntry in
+                preparedQueue.entries.firstIndex(where: { $0.id == currentEntry.id }).map {
+                    preparedQueue.entries.distance(
+                        from: preparedQueue.entries.startIndex,
+                        to: $0
+                    )
+                }
+            }
+            guard StreamingQueueStartVerifier.matches(
+                expectedIndex: plan.selectedIndex,
+                actualIndex: actualIndex
+            ) else {
+                failExplicitSelection(
+                    generation: generation,
+                    message: "선택한 곡을 재생 대기열에 설정하지 못했습니다"
+                )
+                return
+            }
+            syncCurrentEntryFromQueue()
+            startPlayerObservation()
             applyPlaybackRate(playbackRate)
             try await player.play()
-            isPlaying = true
-            enforcePlaybackRate(reason: "playlist-play-started")
-            reapplyPlaybackRateAfterStartup()
+            guard StreamingPlayCompletionGuard.commitIfCurrent(
+                startedGeneration: generation,
+                currentGeneration: selectionGeneration,
+                stopStalePlayback: { player.stop() },
+                commitCurrentPlayback: {
+                    isPlaying = true
+                    enforcePlaybackRate(reason: "playlist-play-started")
+                    reapplyPlaybackRateAfterStartup()
+                }
+            ) else { return }
         } catch {
-            errorMessage = "Apple Music 플레이리스트를 재생할 수 없습니다: \(error.localizedDescription)"
-            isPlaying = false
+            failExplicitSelection(
+                generation: generation,
+                message: "Apple Music 플레이리스트를 재생할 수 없습니다: \(error.localizedDescription)"
+            )
+            return
         }
 
-        isLoading = false
+        if generation == selectionGeneration {
+            isLoading = false
+        }
     }
 
     private func seedBPMCacheFromPrefetchedLookups(_ entries: [Playlist.Entry]) async {
@@ -264,7 +641,6 @@ final class AppleMusicStreamingController: ObservableObject {
         guard !entries.isEmpty else { return }
 
         logger.notice("[bpm_preload] start entries=\(entries.count)")
-        print("[bpm_preload] start entries=\(entries.count)")
         Task(priority: .utility) { [weak self] in
             for entry in entries {
                 let lookup = self?.trackLookup(for: entry) ?? GetSongBPMService.TrackLookup(
@@ -281,14 +657,13 @@ final class AppleMusicStreamingController: ObservableObject {
                 ) else {
                     await MainActor.run { [weak self] in
                         self?.logger.notice("[bpm_preload] empty title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public)")
-                        print("[bpm_preload] empty title=\(entry.title) artist=\(entry.artistName)")
                     }
                     continue
                 }
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    let bpmResult = StreamingBPMResult(
+                    let delayedResult = StreamingBPMResult(
                         bpm: result.bpm,
                         source: .metadata,
                         beatOffsetSeconds: nil,
@@ -297,6 +672,18 @@ final class AppleMusicStreamingController: ObservableObject {
                         beatSyncStatus: .bpmOnly,
                         beatSyncIssue: .missingBeatGrid
                     )
+                    let entryIdentity = self.queueIdentity(for: entry)
+                    let isCurrentEntry = self.currentQueueIdentity == entryIdentity
+                    let decision = StreamingBPMPreloadDecision.decide(
+                        currentResult: isCurrentEntry
+                            ? self.publishedBPMResult
+                            : nil,
+                        delayedResult: delayedResult
+                    )
+                    if isCurrentEntry {
+                        self.applyResolvedBPM(decision.nextPublishedResult)
+                    }
+                    guard case .apply(let bpmResult) = decision else { return }
                     self.cacheBPMResult(
                         bpmResult,
                         songID: lookup.appleMusicID,
@@ -304,11 +691,7 @@ final class AppleMusicStreamingController: ObservableObject {
                         artist: entry.artistName,
                         albumTitle: entry.albumTitle
                     )
-                    if self.currentTitle == entry.title && self.currentArtist == entry.artistName {
-                        self.applyResolvedBPM(bpmResult)
-                    }
                     self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
-                    print("[bpm_preload] success title=\(entry.title) artist=\(entry.artistName) bpm=\(result.bpm)")
                 }
             }
         }
@@ -334,28 +717,56 @@ final class AppleMusicStreamingController: ObservableObject {
 
     func togglePlayback(playbackRate: Double) async {
         guard currentTitle != nil else { return }
+        let generation = selectionGeneration
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard generation == selectionGeneration, currentTitle != nil else { return }
+
         do {
             if isPlaying {
                 player.pause()
                 isPlaying = false
             } else {
                 try await player.play()
-                isPlaying = true
-                applyPlaybackRate(playbackRate)
-                reapplyPlaybackRateAfterStartup()
+                guard StreamingPlayCompletionGuard.commitIfCurrent(
+                    startedGeneration: generation,
+                    currentGeneration: selectionGeneration,
+                    stopStalePlayback: { player.stop() },
+                    commitCurrentPlayback: {
+                        isPlaying = true
+                        applyPlaybackRate(playbackRate)
+                        reapplyPlaybackRateAfterStartup()
+                    }
+                ) else { return }
             }
         } catch {
+            guard generation == selectionGeneration else { return }
             errorMessage = "Apple Music 재생 상태를 변경할 수 없습니다"
             isPlaying = false
         }
     }
 
-    func skipToNext(playbackRate: Double) async {
-        await skip(direction: .next, playbackRate: playbackRate)
+    @discardableResult
+    func skipToNext(
+        playbackRate: Double,
+        expectedIdentity: String? = nil,
+        validateBeforeSkip: @MainActor () -> Bool = { true }
+    ) async -> Bool {
+        await skip(
+            direction: .next,
+            playbackRate: playbackRate,
+            expectedIdentity: expectedIdentity,
+            validateBeforeSkip: validateBeforeSkip
+        )
     }
 
     func skipToPrevious(playbackRate: Double) async {
-        await skip(direction: .previous, playbackRate: playbackRate)
+        _ = await skip(
+            direction: .previous,
+            playbackRate: playbackRate,
+            expectedIdentity: nil,
+            validateBeforeSkip: { true }
+        )
     }
 
     func toggleShuffle() {
@@ -369,22 +780,19 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     func stop() {
+        selectionGeneration &+= 1
         player.stop()
         queueCancellable = nil
         stateCancellable = nil
         nowPlayingTask?.cancel()
         nowPlayingTask = nil
         currentSong = nil
+        clearCurrentPlaylistSession()
+        applyQueuePolicyContext(.empty)
         currentTitle = nil
         currentArtist = nil
         currentArtworkURL = nil
-        currentBPM = nil
-        currentBPMSource = nil
-        currentBeatOffsetSeconds = nil
-        currentBeatTimesSeconds = []
-        currentBeatAlignmentConfidence = nil
-        currentBeatSyncStatus = .needsConfirmation
-        currentBeatSyncIssue = .missingBPM
+        clearResolvedBPMState()
         bpmAnalysisTask?.cancel()
         bpmAnalysisTask = nil
         activePreviewAnalysisKey = nil
@@ -396,6 +804,12 @@ final class AppleMusicStreamingController: ObservableObject {
         isLoading = false
     }
 
+    func pause() {
+        guard isPlaying || player.state.playbackStatus == .playing else { return }
+        player.pause()
+        isPlaying = false
+    }
+
     func applyPlaybackRate(_ playbackRate: Double) {
         let clamped = min(max(playbackRate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
         desiredPlaybackRate = Float(clamped)
@@ -405,7 +819,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
     @discardableResult
     func setManualBPM(_ bpm: Double) -> Bool {
-        guard bpm.isFinite, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+        guard let bpm = BPMRange.validatedOriginalBPM(bpm) else {
             errorMessage = "원본 BPM은 30~300 사이 숫자로 입력하세요"
             return false
         }
@@ -448,13 +862,51 @@ final class AppleMusicStreamingController: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func retryCurrentBPMAnalysis() -> Bool {
+        guard currentBPMSource != .manual, currentTrackOverrideBPM() == nil else {
+            return false
+        }
+
+        if let currentSong {
+            return retryPreviewBPMAnalysis(for: currentSong)
+        }
+
+        guard let entry = player.queue.currentEntry else { return false }
+        return retryPreviewBPMAnalysis(for: entry)
+    }
+
     private enum SkipDirection {
         case next
         case previous
     }
 
-    private func skip(direction: SkipDirection, playbackRate: Double) async {
-        guard currentTitle != nil else { return }
+    private func skip(
+        direction: SkipDirection,
+        playbackRate: Double,
+        expectedIdentity: String?,
+        validateBeforeSkip: @MainActor () -> Bool
+    ) async -> Bool {
+        guard currentTitle != nil else { return false }
+        let snapshot = StreamingQueueCommandSnapshot(
+            selectionGeneration: selectionGeneration,
+            expectedIdentity: expectedIdentity
+        )
+        if expectedIdentity != nil, snapshot.expectedIdentity == nil {
+            return false
+        }
+
+        await queueMutationGate.acquire()
+        defer { queueMutationGate.release() }
+        guard currentTitle != nil,
+              snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+              ),
+              validateBeforeSkip() else { return false }
+
+        isQueueMutationInFlight = true
+        defer { isQueueMutationInFlight = false }
 
         do {
             switch direction {
@@ -464,51 +916,72 @@ final class AppleMusicStreamingController: ObservableObject {
                 try await player.skipToPreviousEntry()
             }
 
+            guard snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+            ) else { return false }
+
+            isQueueMutationInFlight = false
             syncPlaybackStatus()
             syncCurrentEntryFromQueue()
             applyPlaybackRate(playbackRate)
             reapplyPlaybackRateAfterStartup()
+            return true
         } catch {
+            guard snapshot.isCurrent(
+                selectionGeneration: selectionGeneration,
+                currentIdentity: currentQueueIdentity
+            ) else { return false }
             errorMessage = direction == .next
                 ? "다음 곡으로 넘어갈 수 없습니다"
                 : "이전 곡으로 돌아갈 수 없습니다"
+            return false
         }
     }
 
     private func startPlayerObservation() {
         nowPlayingTask?.cancel()
+        let generation = selectionGeneration
 
         queueCancellable = player.queue.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 await Task.yield()
-                self?.syncCurrentEntryFromQueue()
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncCurrentEntryFromQueue()
             }
         }
 
         stateCancellable = player.state.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
                 await Task.yield()
-                self?.syncPlaybackStatus()
-                self?.syncShuffleStatus()
-                self?.syncRepeatStatus()
-                self?.syncCurrentEntryFromQueue()
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncPlaybackStatus()
+                self.syncShuffleStatus()
+                self.syncRepeatStatus()
+                self.syncCurrentEntryFromQueue()
             }
         }
 
         nowPlayingTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                self?.syncPlaybackStatus()
-                self?.syncShuffleStatus()
-                self?.syncRepeatStatus()
-                self?.syncCurrentEntryFromQueue()
-                self?.enforcePlaybackRateIfPlaying(reason: "poll")
+                guard let self, self.selectionGeneration == generation else { return }
+                self.syncPlaybackStatus()
+                self.syncShuffleStatus()
+                self.syncRepeatStatus()
+                self.syncCurrentEntryFromQueue()
+                self.enforcePlaybackRateIfPlaying(reason: "poll")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }
 
     private func syncCurrentEntryFromQueue() {
+        guard !isQueueMutationInFlight else { return }
         guard let entry = player.queue.currentEntry else { return }
+        syncCurrentPlaylistPosition(from: entry)
+        var context = queuePolicyContext
+        context.replaceIdentity(queueIdentity(for: entry))
+        applyQueuePolicyContext(context)
         currentTitle = entry.title
         currentArtist = artistName(for: entry) ?? entry.subtitle
         currentArtworkURL = artworkURL(for: entry)
@@ -518,6 +991,24 @@ final class AppleMusicStreamingController: ObservableObject {
             startPreviewBPMAnalysisIfNeeded(for: entry)
         }
         enforcePlaybackRateIfPlaying(reason: "queue-sync")
+    }
+
+    private func syncCurrentPlaylistPosition(
+        from entry: MusicKit.MusicPlayer.Queue.Entry
+    ) {
+        guard isPlaylistQueueContext, !currentPlaylistEntries.isEmpty else { return }
+        let queueEntries = player.queue.entries
+        guard let queueIndex = queueEntries.firstIndex(where: { $0.id == entry.id }) else {
+            return
+        }
+        let observedIndex = queueEntries.distance(
+            from: queueEntries.startIndex,
+            to: queueIndex
+        )
+        guard currentPlaylistEntries.indices.contains(observedIndex) else { return }
+
+        currentPlaylistIndex = observedIndex
+        currentPlaylistEntryID = currentPlaylistEntries[observedIndex].id.rawValue
     }
 
     private func artworkURL(for entry: MusicKit.MusicPlayer.Queue.Entry) -> URL? {
@@ -589,12 +1080,20 @@ final class AppleMusicStreamingController: ObservableObject {
     ) -> StreamingBPMResult? {
         guard didBuildBPMCache else { return nil }
 
-        if let songID, let bpm = bpmCacheByKey[storeKey(songID)] {
+        if let songID,
+           let bpm = bpmCacheByKey[storeKey(songID)]?.validated {
             return bpm
         }
 
-        return bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: albumTitle)]
-            ?? bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: nil)]
+        if let bpm = bpmCacheByKey[
+            metadataKey(title: title, artist: artist, albumTitle: albumTitle)
+        ]?.validated {
+            return bpm
+        }
+
+        return bpmCacheByKey[
+            metadataKey(title: title, artist: artist, albumTitle: nil)
+        ]?.validated
     }
 
     private func prepareBPMCacheIfPossible() async {
@@ -620,8 +1119,9 @@ final class AppleMusicStreamingController: ObservableObject {
         var cache: [String: StreamingBPMResult] = [:]
         let items = MPMediaQuery.songs().items ?? []
         for item in items {
-            let bpm = Double(item.beatsPerMinute)
-            guard bpm > 0 else { continue }
+            guard let bpm = BPMRange.validatedOriginalBPM(Double(item.beatsPerMinute)) else {
+                continue
+            }
             let result = StreamingBPMResult(
                 bpm: bpm,
                 source: .metadata,
@@ -659,13 +1159,28 @@ final class AppleMusicStreamingController: ObservableObject {
             return
         }
 
-        currentBPMSource = result?.source
-        currentBPM = result?.bpm
-        currentBeatOffsetSeconds = result?.beatOffsetSeconds
-        currentBeatTimesSeconds = result?.beatTimesSeconds ?? []
-        currentBeatAlignmentConfidence = result?.confidence
-        currentBeatSyncStatus = result?.beatSyncStatus ?? .needsConfirmation
-        currentBeatSyncIssue = result?.beatSyncIssue ?? .missingBPM
+        let validatedResult = result?.validated
+        currentBPMSource = validatedResult?.source
+        currentBPM = validatedResult?.bpm
+        currentBeatOffsetSeconds = validatedResult?.beatOffsetSeconds
+        currentBeatTimesSeconds = validatedResult?.beatTimesSeconds ?? []
+        currentBeatAlignmentConfidence = validatedResult?.confidence
+        currentBeatSyncStatus = validatedResult?.beatSyncStatus ?? .needsConfirmation
+        currentBeatSyncIssue = validatedResult?.beatSyncIssue ?? .missingBPM
+    }
+
+    private var publishedBPMResult: StreamingBPMResult? {
+        guard let bpm = currentBPM,
+              let source = currentBPMSource else { return nil }
+        return StreamingBPMResult(
+            bpm: bpm,
+            source: source,
+            beatOffsetSeconds: currentBeatOffsetSeconds,
+            beatTimesSeconds: currentBeatTimesSeconds,
+            confidence: currentBeatAlignmentConfidence,
+            beatSyncStatus: currentBeatSyncStatus,
+            beatSyncIssue: currentBeatSyncIssue
+        ).validated
     }
 
     private func currentTrackOverrideBPM() -> Double? {
@@ -715,14 +1230,58 @@ final class AppleMusicStreamingController: ObservableObject {
         return keys
     }
 
-    private func startPreviewBPMAnalysisIfNeeded(for song: Song) {
+    private func retryPreviewBPMAnalysis(for song: Song) -> Bool {
+        let identityKey = previewAnalysisIdentityKey(
+            songID: song.id.rawValue,
+            title: song.title,
+            artist: song.artistName,
+            albumTitle: song.albumTitle
+        )
+        preparePreviewBPMRetry(identityKey: identityKey)
+        startPreviewBPMAnalysisIfNeeded(for: song, forcePreviewAnalysis: true)
+        return true
+    }
+
+    private func retryPreviewBPMAnalysis(for entry: MusicKit.MusicPlayer.Queue.Entry) -> Bool {
+        if case .song(let song)? = entry.item {
+            return retryPreviewBPMAnalysis(for: song)
+        }
+        if let song = entry.transientItem as? Song {
+            return retryPreviewBPMAnalysis(for: song)
+        }
+
+        let identityKey = previewAnalysisIdentityKey(
+            songID: entry.id,
+            title: entry.title,
+            artist: artistName(for: entry) ?? entry.subtitle,
+            albumTitle: nil
+        )
+        preparePreviewBPMRetry(identityKey: identityKey)
+        startPreviewBPMAnalysisIfNeeded(for: entry, forcePreviewAnalysis: true)
+        return true
+    }
+
+    private func preparePreviewBPMRetry(identityKey: String) {
+        previewAnalysisRetryPolicy.reset(identity: identityKey)
+        getSongBPMAttemptedKeys.remove(identityKey)
+        bpmAnalysisTask?.cancel()
+        bpmAnalysisTask = nil
+        activePreviewAnalysisKey = nil
+        errorMessage = nil
+    }
+
+    private func startPreviewBPMAnalysisIfNeeded(
+        for song: Song,
+        forcePreviewAnalysis: Bool = false
+    ) {
         startPreviewBPMAnalysisIfNeeded(
             songID: song.id.rawValue,
             isrc: song.isrc,
             title: song.title,
             artist: song.artistName,
             albumTitle: song.albumTitle,
-            previewAssets: song.previewAssets
+            previewAssets: song.previewAssets,
+            forcePreviewAnalysis: forcePreviewAnalysis
         )
     }
 
@@ -742,15 +1301,35 @@ final class AppleMusicStreamingController: ObservableObject {
         )
     }
 
-    private func startPreviewBPMAnalysisIfNeeded(for entry: MusicKit.MusicPlayer.Queue.Entry) {
+    private func startPreviewBPMAnalysisIfNeeded(
+        for entry: MusicKit.MusicPlayer.Queue.Entry,
+        forcePreviewAnalysis: Bool = false
+    ) {
         if case .song(let song)? = entry.item {
-            startPreviewBPMAnalysisIfNeeded(for: song)
+            startPreviewBPMAnalysisIfNeeded(
+                for: song,
+                forcePreviewAnalysis: forcePreviewAnalysis
+            )
             return
         }
 
         if let song = entry.transientItem as? Song {
-            startPreviewBPMAnalysisIfNeeded(for: song)
+            startPreviewBPMAnalysisIfNeeded(
+                for: song,
+                forcePreviewAnalysis: forcePreviewAnalysis
+            )
+            return
         }
+
+        startPreviewBPMAnalysisIfNeeded(
+            songID: entry.id,
+            isrc: nil,
+            title: entry.title,
+            artist: artistName(for: entry) ?? entry.subtitle,
+            albumTitle: nil,
+            previewAssets: nil,
+            forcePreviewAnalysis: forcePreviewAnalysis
+        )
     }
 
     private func startPreviewBPMAnalysisIfNeeded(
@@ -759,14 +1338,22 @@ final class AppleMusicStreamingController: ObservableObject {
         title: String,
         artist: String?,
         albumTitle: String?,
-        previewAssets: [PreviewAsset]?
+        previewAssets: [PreviewAsset]?,
+        forcePreviewAnalysis: Bool = false
     ) {
-        let identityKey = songID.map(storeKey) ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
-        let cachedResult = bpmCacheByKey[identityKey]
+        let identityKey = previewAnalysisIdentityKey(
+            songID: songID,
+            title: title,
+            artist: artist,
+            albumTitle: albumTitle
+        )
+        let cachedResult = bpmCacheByKey[identityKey]?.validated
         let shouldTryGetSongBPM = !getSongBPMAttemptedKeys.contains(identityKey)
-        guard cachedResult == nil || shouldTryGetSongBPM else { return }
+        let shouldTryPreviewAnalysis = forcePreviewAnalysis
+            || (cachedResult == nil && previewAnalysisRetryPolicy.shouldAttempt(identity: identityKey))
+        guard cachedResult == nil || shouldTryGetSongBPM || shouldTryPreviewAnalysis else { return }
         guard activePreviewAnalysisKey != identityKey else { return }
-        guard shouldTryGetSongBPM || !failedPreviewAnalysisKeys.contains(identityKey) else { return }
+        guard shouldTryGetSongBPM || shouldTryPreviewAnalysis else { return }
         let previewAsset = previewAssets?.first(where: { $0.url != nil || $0.hlsURL != nil })
         let directPreviewURL = previewAsset?.url
         let hlsPreviewURL = previewAsset?.hlsURL
@@ -792,14 +1379,16 @@ final class AppleMusicStreamingController: ObservableObject {
                         directURL: directPreviewURL,
                         hlsURL: hlsPreviewURL,
                         title: title,
-                        artist: artist
+                        artist: artist,
+                        forceRefresh: forcePreviewAnalysis
                     )
                 }
             )
             let resolution = await resolver.resolve(
                 cachedResult: cachedResult,
                 shouldTryGetSongBPM: shouldTryGetSongBPM,
-                shouldTryPreviewAnalysis: cachedResult == nil,
+                shouldTryPreviewAnalysis: shouldTryPreviewAnalysis,
+                forcePreviewAnalysis: forcePreviewAnalysis,
                 title: title,
                 artist: artist,
                 appleMusicID: songID,
@@ -809,16 +1398,18 @@ final class AppleMusicStreamingController: ObservableObject {
             guard let self else { return }
             self.activePreviewAnalysisKey = nil
             guard let result = resolution.result else {
-                self.failedPreviewAnalysisKeys.insert(identityKey)
+                self.previewAnalysisRetryPolicy.recordFailure(identity: identityKey)
                 self.logger.info("[bpm_resolver] failed title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public)")
                 return
             }
 
-            if let songID {
-                self.bpmCacheByKey[self.storeKey(songID)] = result
-            }
-            self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
-            self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: nil)] = result
+            self.cacheBPMResult(
+                result,
+                songID: songID,
+                title: title,
+                artist: artist,
+                albumTitle: albumTitle
+            )
             await GetSongBPMService.shared.recordBPM(
                 result.bpm,
                 title: title,
@@ -827,11 +1418,21 @@ final class AppleMusicStreamingController: ObservableObject {
                 isrc: isrc
             )
 
-            if self.currentTitle == title && (artist == nil || self.currentArtist == artist) {
+            if self.currentQueueIdentity == identityKey {
                 self.applyResolvedBPM(result)
             }
             self.logger.info("[bpm_resolver] success bpm=\(result.bpm) source=\(result.source.badgeText, privacy: .public) title=\(title, privacy: .public)")
         }
+    }
+
+    private func previewAnalysisIdentityKey(
+        songID: String?,
+        title: String,
+        artist: String?,
+        albumTitle: String?
+    ) -> String {
+        songID.map(storeKey)
+            ?? metadataKey(title: title, artist: artist, albumTitle: albumTitle)
     }
 
     private func cacheBPMResult(
@@ -841,6 +1442,7 @@ final class AppleMusicStreamingController: ObservableObject {
         artist: String?,
         albumTitle: String?
     ) {
+        guard let result = result.validated else { return }
         if let songID {
             bpmCacheByKey[storeKey(songID)] = result
         }
@@ -862,6 +1464,28 @@ final class AppleMusicStreamingController: ObservableObject {
                 title: currentSong.title,
                 artist: currentSong.artistName,
                 albumTitle: currentSong.albumTitle
+            )
+        }
+
+        if let currentPlaylistIndex,
+           currentPlaylistEntries.indices.contains(currentPlaylistIndex) {
+            let playlistEntry = currentPlaylistEntries[currentPlaylistIndex]
+            if case .song(let song)? = playlistEntry.item {
+                return (
+                    songID: song.id.rawValue,
+                    isrc: song.isrc,
+                    title: song.title,
+                    artist: song.artistName,
+                    albumTitle: song.albumTitle
+                )
+            }
+
+            return (
+                songID: playlistEntry.id.rawValue,
+                isrc: playlistEntry.isrc,
+                title: playlistEntry.title,
+                artist: playlistEntry.artistName,
+                albumTitle: playlistEntry.albumTitle
             )
         }
 
@@ -903,6 +1527,27 @@ final class AppleMusicStreamingController: ObservableObject {
             artist: currentArtist,
             albumTitle: nil
         )
+    }
+
+    private func queueIdentity(for entry: MusicKit.MusicPlayer.Queue.Entry) -> String? {
+        if case .song(let song)? = entry.item {
+            return storeKey(song.id.rawValue)
+        }
+        if let song = entry.transientItem as? Song {
+            return storeKey(song.id.rawValue)
+        }
+        let entryID = entry.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entryID.isEmpty else { return nil }
+        return storeKey(entryID)
+    }
+
+    private func queueIdentity(for entry: Playlist.Entry) -> String? {
+        if case .song(let song)? = entry.item {
+            return storeKey(song.id.rawValue)
+        }
+        let entryID = entry.id.rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entryID.isEmpty else { return nil }
+        return storeKey(entryID)
     }
 
     private func reapplyPlaybackRateAfterStartup() {
@@ -1009,25 +1654,37 @@ actor PreviewBPMAnalyzer {
         directURL: URL?,
         hlsURL: URL?,
         title: String,
-        artist: String?
+        artist: String?,
+        forceRefresh: Bool = false
     ) async -> BeatAlignmentAnalysis? {
         let lookupKey = metadataKey(title: title, artist: artist)
-        if let cached = cacheByLookupKey[lookupKey] {
+        if !forceRefresh, let cached = cacheByLookupKey[lookupKey] {
             return cached
         }
 
-        if let directURL, let analysis = await estimateBeatAlignment(fromDirectURL: directURL) {
+        if let directURL,
+           let analysis = await estimateBeatAlignment(
+                fromDirectURL: directURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
 
-        if let hlsURL, let analysis = await estimateBeatAlignment(fromHLSURL: hlsURL) {
+        if let hlsURL,
+           let analysis = await estimateBeatAlignment(
+                fromHLSURL: hlsURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
 
         if let fallbackURL = await findITunesPreviewURL(title: title, artist: artist),
-           let analysis = await estimateBeatAlignment(fromDirectURL: fallbackURL) {
+           let analysis = await estimateBeatAlignment(
+                fromDirectURL: fallbackURL,
+                forceRefresh: forceRefresh
+           ) {
             cacheByLookupKey[lookupKey] = analysis
             return analysis
         }
@@ -1035,8 +1692,11 @@ actor PreviewBPMAnalyzer {
         return nil
     }
 
-    private func estimateBeatAlignment(fromDirectURL url: URL) async -> BeatAlignmentAnalysis? {
-        if let cached = cacheByURL[url] {
+    private func estimateBeatAlignment(
+        fromDirectURL url: URL,
+        forceRefresh: Bool = false
+    ) async -> BeatAlignmentAnalysis? {
+        if !forceRefresh, let cached = cacheByURL[url] {
             return cached
         }
 
@@ -1063,8 +1723,11 @@ actor PreviewBPMAnalyzer {
         }
     }
 
-    private func estimateBeatAlignment(fromHLSURL url: URL) async -> BeatAlignmentAnalysis? {
-        if let cached = cacheByURL[url] {
+    private func estimateBeatAlignment(
+        fromHLSURL url: URL,
+        forceRefresh: Bool = false
+    ) async -> BeatAlignmentAnalysis? {
+        if !forceRefresh, let cached = cacheByURL[url] {
             return cached
         }
 

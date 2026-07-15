@@ -1,5 +1,8 @@
 # PR 1: 큐 인프라 리팩터 (외부 동작 변경 없음)
 
+> [!WARNING]
+> **이 문서는 역사적 인프라 계획이며 템포 기본값·재생 가능 정책의 근거가 아니다.** 아래의 `.rateOutOfRange`, 케이던스/재생속도 기반 자동 스킵, 120 BPM fallback 또는 기본값 표현은 현행 구현에 적용하지 않는다. 현재 정책은 `docs/plans/2026-07-16-acceleration-only-tempo-policy-design.md`와 `docs/plans/2026-07-16-acceleration-only-tempo-policy.md`를 따른다. 30~300 BPM으로 확인된 곡은 감속·거부·템포 기반 자동 스킵 없이 재생하고, BPM이 없거나 범위 밖이면 가정값을 적용하지 않고 확인을 요청한다. 아래 본문은 당시 큐 인프라 변경의 역사적 맥락으로만 보존한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 추후 Apple Music 큐 기능 인프라 타입·훅을 `AudioManager`에 도입하되 **기존 외부 동작 불변**. 기존 30개 테스트 회귀 없이 통과.

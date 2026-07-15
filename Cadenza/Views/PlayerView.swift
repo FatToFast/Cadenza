@@ -14,6 +14,8 @@ struct PlayerView: View {
     @State private var showAppleMusicPicker = false
     @State private var showAppleMusicStreamingSearch = false
     @State private var showAppleMusicStreamingPlaylists = false
+    @State private var showAppleMusicCurrentPlaylist = false
+    @State private var openAppleMusicPlaylistPickerAfterCurrentSheet = false
     @State private var showLocalQueueSheet = false
     @State private var isImportingAppleMusic = false
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
@@ -40,9 +42,8 @@ struct PlayerView: View {
 
                         // BPM 디스플레이
                         BPMDisplayView(
-                            targetBPM: audio.targetBPM,
+                            tempoPlan: audio.tempoPlan,
                             originalBPM: nowPlaying.originalBPM,
-                            playbackRate: audio.playbackRate,
                             originalBPMSource: nowPlaying.originalBPMSource,
                             cadenceFit: currentCadenceFit
                         )
@@ -51,7 +52,6 @@ struct PlayerView: View {
                         // BPM 슬라이더
                         BPMSliderView(
                             targetBPM: $audio.targetBPM,
-                            playbackRate: audio.playbackRate,
                             onDecrease: { audio.nudgeTargetBPM(by: -5) },
                             onReset: { audio.resetTargetBPM() },
                             onIncrease: { audio.nudgeTargetBPM(by: 5) }
@@ -141,9 +141,24 @@ struct PlayerView: View {
             }
         }
         .sheet(isPresented: $showAppleMusicStreamingPlaylists) {
-            AppleMusicStreamingPlaylistView { playlist, entry, entries in
+            AppleMusicStreamingPlaylistView(targetCadence: $audio.targetBPM) { playlist, entry, entries in
                 playAppleMusicPlaylist(playlist, entry: entry, entries: entries)
             }
+        }
+        .sheet(
+            isPresented: $showAppleMusicCurrentPlaylist,
+            onDismiss: openFullAppleMusicPlaylistPickerIfRequested
+        ) {
+            AppleMusicCurrentPlaylistSheet(
+                playlistName: streaming.currentPlaylistName ?? "현재 플레이리스트",
+                entries: streaming.currentPlaylistEntries,
+                currentEntryID: streaming.currentPlaylistEntryID,
+                bpmValue: streaming.cachedBPMValue(for:),
+                onSelect: playCurrentAppleMusicPlaylistEntry,
+                onChooseAnotherPlaylist: {
+                    openAppleMusicPlaylistPickerAfterCurrentSheet = true
+                }
+            )
         }
         .sheet(isPresented: $showLocalQueueSheet) {
             LocalQueueSheet()
@@ -163,19 +178,25 @@ struct PlayerView: View {
                 syncStreamingMetronome()
             }
         }
+        .onChange(of: audio.targetBPM) { _, _ in
+            applyStreamingTempoAndAlignment()
+        }
         .onChange(of: audio.metronomeEnabled) { _, _ in
             syncStreamingMetronome()
         }
         .onChange(of: streaming.isPlaying) { _, _ in
-            syncStreamingMetronome()
+            applyStreamingTempoAndAlignment()
         }
         .onChange(of: streaming.errorMessage) { _, message in
             if let message {
                 audio.presentError(message)
             }
         }
-        .onChange(of: streaming.currentBPM) { _, bpm in
-            applyStreamingTempoAndAlignment(bpm: bpm)
+        .onChange(of: streaming.currentQueueIdentity) { _, _ in
+            applyStreamingTempoAndAlignment()
+        }
+        .onChange(of: streaming.currentBPM) { _, _ in
+            applyStreamingTempoAndAlignment()
         }
         .onChange(of: streaming.currentBPMSource) { _, _ in
             applyStreamingTempoAndAlignment()
@@ -188,12 +209,6 @@ struct PlayerView: View {
         }
         .onChange(of: streaming.currentBeatSyncStatus) { _, _ in
             applyStreamingTempoAndAlignment()
-        }
-        .onChange(of: audio.originalBPM) { _, _ in
-            applyAutoBPMDefaultIfNeeded()
-        }
-        .onChange(of: audio.originalBPMSource) { _, _ in
-            applyAutoBPMDefaultIfNeeded()
         }
         .onReceive(audio.trackEndedSubject) { _ in
             handleLocalPlaylistTrackEnded()
@@ -237,8 +252,6 @@ struct PlayerView: View {
                     .frame(width: 220, height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                playbackControls
-
                 Label("Apple Music 스트리밍 - 피치락 미지원", systemImage: "cloud.fill")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaWarning)
@@ -246,6 +259,31 @@ struct PlayerView: View {
                     .padding(.vertical, 4)
                     .background(Color.cadenzaWarning.opacity(0.15))
                     .clipShape(Capsule())
+
+                if streaming.hasCurrentPlaylist {
+                    Button {
+                        showAppleMusicCurrentPlaylist = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet")
+                            Text("현재 플레이리스트")
+                            if let index = streaming.currentPlaylistIndex {
+                                Text("\(index + 1) / \(streaming.currentPlaylistEntries.count)")
+                                    .foregroundColor(.cadenzaTextTertiary)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                        }
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaAccent)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(Color.cadenzaBackgroundSecondary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("이미 불러온 플레이리스트에서 다른 곡을 선택합니다")
+                }
             }
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
@@ -267,8 +305,6 @@ struct PlayerView: View {
                 trackArtworkOrCadence
                     .frame(width: 220, height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                playbackControls
 
                 // 상태 배지
                 Label("키 락 ON", systemImage: "music.note")
@@ -319,7 +355,6 @@ struct PlayerView: View {
                     .foregroundColor(.cadenzaTextSecondary)
                     .multilineTextAlignment(.center)
 
-                playbackControls
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
@@ -339,7 +374,6 @@ struct PlayerView: View {
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaTextSecondary)
 
-                playbackControls
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 20)
@@ -447,7 +481,7 @@ struct PlayerView: View {
     private var originalBPMControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("원본 BPM")
+                Text("원곡 BPM")
                     .font(.cadenzaBody)
                     .foregroundColor(.cadenzaTextPrimary)
                 Spacer()
@@ -532,7 +566,7 @@ struct PlayerView: View {
 
     private var cadenceFallback: some View {
         CadenceVisualization(
-            bpm: Int(nowPlaying.originalBPM.rounded()),
+            cadence: Int(audio.effectiveCadence.rounded()),
             isActive: audio.state == .playing || streaming.isPlaying
         )
     }
@@ -569,54 +603,41 @@ struct PlayerView: View {
     }
 
     private func bpmChoiceSection(pair: BPMOctaveChoicePair) -> some View {
-        let goal = audio.targetBPM
-        let defaultChoice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: goal)
         let activeBPM = nowPlaying.originalBPM.rounded()
 
         return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("BPM 확인")
-                    .font(.cadenzaBody)
-                    .foregroundColor(.cadenzaTextPrimary)
-                Spacer()
-                Text("자동 선택됨")
-                    .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaTextTertiary)
-            }
+            Text("BPM 확인")
+                .font(.cadenzaBody)
+                .foregroundColor(.cadenzaTextPrimary)
 
             HStack(spacing: 10) {
-                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM, defaultBPM: defaultChoice)
-                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM, defaultBPM: defaultChoice)
+                bpmChoiceButton(bpm: pair.lower, activeBPM: activeBPM)
+                bpmChoiceButton(bpm: pair.upper, activeBPM: activeBPM)
             }
 
-            Text("목표 \(Int(goal.rounded())) BPM에 가까운 \(Int(defaultChoice)) BPM을 적용했습니다. 다른 값을 누르면 변경됩니다.")
+            Text("감지된 원곡 BPM을 유지합니다. 박자가 두 배 또는 절반으로 잡혔다면 다른 값을 선택하세요.")
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
         }
     }
 
-    private func bpmChoiceButton(bpm: Double, activeBPM: Double, defaultBPM: Double) -> some View {
+    private func bpmChoiceButton(bpm: Double, activeBPM: Double) -> some View {
         let isActive = abs(activeBPM - bpm) < 0.5
         let label = "\(Int(bpm)) BPM"
         return Button {
             confirmBPMChoice(bpm)
         } label: {
-            VStack(spacing: 4) {
-                Text(label)
-                    .font(.cadenzaBody)
-                if abs(bpm - defaultBPM) < 0.5 {
-                    Text("목표에 가까움")
-                        .font(.cadenzaCaption)
-                        .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextTertiary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
-            .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Text(label)
+                .font(.cadenzaBody)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(isActive ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
+                .foregroundColor(isActive ? .cadenzaBackground : .cadenzaTextPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .accessibilityLabel("\(label) 적용")
+        .accessibilityLabel(label)
+        .accessibilityValue(isActive ? "선택됨" : "선택 안 됨")
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private func confirmBPMChoice(_ bpm: Double) {
@@ -631,19 +652,6 @@ struct PlayerView: View {
             audio.setOriginalBPM(bpm)
         }
         originalBPMText = "\(Int(bpm))"
-    }
-
-    private func applyAutoBPMDefaultIfNeeded() {
-        guard let pair = ambiguousBPMOctaveChoicePair else { return }
-        let choice = BPMOctaveChoice.defaultChoice(for: pair, goalCadence: audio.targetBPM)
-        if streaming.hasSong {
-            // Streaming controller already published a BPM; only adjust if it's the
-            // wrong octave. Avoid touching streaming's source-of-truth except via
-            // the audio manager's lighter auto-default path.
-            audio.applyAutoBPMDefault(choice)
-        } else {
-            audio.applyAutoBPMDefault(choice)
-        }
     }
 
     private var beatSyncStatusSection: some View {
@@ -667,7 +675,27 @@ struct PlayerView: View {
             Text(currentBeatSyncStatus.helperText(issue: currentBeatSyncIssue))
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextSecondary)
+
+            if canRetryStreamingBPMAnalysis {
+                Button {
+                    _ = streaming.retryCurrentBPMAnalysis()
+                } label: {
+                    Label("다시 분석", systemImage: "arrow.clockwise")
+                        .font(.cadenzaBody)
+                        .foregroundColor(.cadenzaAccent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.cadenzaBackgroundSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("현재 곡의 BPM과 박자 정보를 다시 확인합니다")
+            }
         }
+    }
+
+    private var canRetryStreamingBPMAnalysis: Bool {
+        guard streaming.hasSong, streaming.currentBPMSource != .manual else { return false }
+        return currentBeatSyncStatus == .needsConfirmation || currentBeatSyncStatus == .bpmOnly
     }
 
     // MARK: - Metronome Controls
@@ -896,7 +924,9 @@ struct PlayerView: View {
             return true
         }
         switch audio.state {
-        case .ready, .paused, .playing:
+        case .ready, .paused:
+            return audio.canStartPlayback
+        case .playing:
             return true
         case .idle:
             return audio.canStartPlayback
@@ -912,16 +942,19 @@ struct PlayerView: View {
     // MARK: - Error Banner (DESIGN.md 2.2.2)
 
     private func errorBanner(message: String) -> some View {
-        HStack {
+        let recoveryAction = PlayerErrorRecoveryPolicy.action(
+            hasStreamingSong: streaming.hasSong,
+            hasCurrentStreamingPlaylist: streaming.hasCurrentPlaylist
+        )
+        return HStack {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.cadenzaWarning)
             Text(message)
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextPrimary)
             Spacer()
-            Button("다른 파일 선택") {
-                audio.clearError()
-                showFilePicker = true
+            Button(recoveryAction.buttonTitle) {
+                handleErrorRecovery(recoveryAction)
             }
             .font(.cadenzaCaption)
             .foregroundColor(.cadenzaWarning)
@@ -933,6 +966,18 @@ struct PlayerView: View {
                 .stroke(Color.cadenzaWarning, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func handleErrorRecovery(_ action: PlayerErrorRecoveryAction) {
+        audio.clearError()
+        switch action {
+        case .showCurrentStreamingPlaylist:
+            showAppleMusicCurrentPlaylist = true
+        case .dismiss:
+            break
+        case .chooseLocalFile:
+            showFilePicker = true
+        }
     }
 
     // MARK: - File Selection
@@ -994,7 +1039,7 @@ struct PlayerView: View {
 
     private func playAppleMusicStream(_ song: Song) {
         audio.clearError()
-        audio.clearLocalPlaylist()
+        audio.prepareForStreamingPlayback()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
             audio.pause()
@@ -1007,7 +1052,7 @@ struct PlayerView: View {
 
     private func playAppleMusicPlaylist(_ playlist: Playlist, entry: Playlist.Entry, entries: [Playlist.Entry]) {
         audio.clearError()
-        audio.clearLocalPlaylist()
+        audio.prepareForStreamingPlayback()
         audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
         if audio.state == .playing {
             audio.pause()
@@ -1023,6 +1068,25 @@ struct PlayerView: View {
         }
     }
 
+    private func playCurrentAppleMusicPlaylistEntry(_ entry: Playlist.Entry) {
+        audio.clearError()
+        audio.prepareForStreamingPlayback()
+        audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
+        if audio.state == .playing {
+            audio.pause()
+        }
+        Task {
+            await streaming.playCurrentPlaylistEntry(entry, playbackRate: 1.0)
+            applyStreamingTempoAndAlignment()
+        }
+    }
+
+    private func openFullAppleMusicPlaylistPickerIfRequested() {
+        guard openAppleMusicPlaylistPickerAfterCurrentSheet else { return }
+        openAppleMusicPlaylistPickerAfterCurrentSheet = false
+        showAppleMusicStreamingPlaylists = true
+    }
+
     private func handlePrimaryPlayback() {
         if streaming.hasSong {
             Task {
@@ -1036,15 +1100,13 @@ struct PlayerView: View {
 
     private func handleStreamingNext() {
         Task {
-            await streaming.skipToNext(playbackRate: 1.0)
-            applyStreamingTempoAndAlignment()
+            _ = await streaming.skipToNext(playbackRate: 1.0)
         }
     }
 
     private func handleStreamingPrevious() {
         Task {
             await streaming.skipToPrevious(playbackRate: 1.0)
-            applyStreamingTempoAndAlignment()
         }
     }
 
@@ -1088,15 +1150,25 @@ struct PlayerView: View {
         audio.startExternalMetronomePlayback(alignedToSourceTime: streaming.playbackTime)
     }
 
-    private func applyStreamingTempoAndAlignment(bpm: Double? = nil) {
-        guard streaming.hasSong else { return }
+    private func applyStreamingTempoAndAlignment() {
+        guard StreamingTempoPolicyGate.shouldEvaluate(
+            hasSong: streaming.hasSong,
+            isLoading: streaming.isLoading
+        ) else { return }
+        let bpm = streaming.currentBPM
         audio.setStreamingBeatAlignment(
-            bpm: bpm ?? streaming.currentBPM,
+            bpm: bpm,
             source: streaming.currentBPMSource ?? .metadata,
             beatOffsetSeconds: streaming.currentBeatOffsetSeconds,
             beatTimesSeconds: streaming.currentBeatTimesSeconds,
             confidence: streaming.currentBeatAlignmentConfidence
         )
+        guard bpm != nil, streaming.currentBPMSource != nil else {
+            streaming.applyPlaybackRate(1.0)
+            syncStreamingMetronome()
+            return
+        }
+
         streaming.applyPlaybackRate(audio.playbackRate)
         syncStreamingMetronome()
     }
@@ -1133,13 +1205,13 @@ struct PlayerView: View {
 
     private func applyOriginalBPM() {
         guard let bpm = Double(originalBPMText) else {
-            audio.presentError("원본 BPM은 30~300 사이 숫자로 입력하세요")
+            audio.presentError("원곡 BPM은 30~300 사이 숫자로 입력하세요")
             return
         }
 
         if streaming.hasSong {
             guard streaming.setManualBPM(bpm) else { return }
-            applyStreamingTempoAndAlignment(bpm: bpm)
+            applyStreamingTempoAndAlignment()
         } else {
             audio.setOriginalBPM(bpm)
         }

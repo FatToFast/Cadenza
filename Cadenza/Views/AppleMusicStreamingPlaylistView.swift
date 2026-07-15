@@ -3,14 +3,15 @@ import SwiftUI
 
 @MainActor
 struct AppleMusicStreamingPlaylistView: View {
+    @Binding var targetCadence: Double
     let onEntryPicked: (Playlist, Playlist.Entry, [Playlist.Entry]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var playlists: [Playlist] = []
+    @State private var detailedPlaylistsByID: [MusicItemID: Playlist] = [:]
     @State private var entriesByPlaylist: [MusicItemID: [Playlist.Entry]] = [:]
-    @State private var bpmByEntryID: [String: Int] = [:]
-    @State private var cadenceFitsByEntryID: [String: RunningCadenceFit] = [:]
+    @State private var bpmByEntryID: [String: Double] = [:]
     @State private var bpmLookupAttemptedEntryIDs: Set<String> = []
     @State private var hiddenEntryIDs: Set<MusicItemID> = []
     @State private var isLoading = false
@@ -132,7 +133,18 @@ struct AppleMusicStreamingPlaylistView: View {
             let visibleEntries = (entriesByPlaylist[playlist.id] ?? []).filter { !hiddenEntryIDs.contains($0.id) }
             ForEach(visibleEntries, id: \.id) { entry in
                 Button {
-                    onEntryPicked(playlist, entry, entriesByPlaylist[playlist.id] ?? [])
+                    let detailedPlaylist = detailedPlaylistsByID[playlist.id]
+                    guard StreamingPlaylistQueuePolicy.canStart(
+                        hasDetailedPlaylistContext: detailedPlaylist != nil
+                    ), let detailedPlaylist else {
+                        errorMessage = "상세 플레이리스트를 다시 불러와 주세요"
+                        return
+                    }
+                    onEntryPicked(
+                        detailedPlaylist,
+                        entry,
+                        entriesByPlaylist[playlist.id] ?? []
+                    )
                     dismiss()
                 } label: {
                     HStack(alignment: .top, spacing: 12) {
@@ -189,6 +201,7 @@ struct AppleMusicStreamingPlaylistView: View {
         do {
             let detailedPlaylist = try await playlist.with(.entries)
             let entries = Array(detailedPlaylist.entries ?? [])
+            detailedPlaylistsByID[playlist.id] = detailedPlaylist
             entriesByPlaylist[playlist.id] = entries
             preloadBPMs(for: entries)
         } catch {
@@ -202,7 +215,7 @@ struct AppleMusicStreamingPlaylistView: View {
         let entryID = entry.id.rawValue
         VStack(alignment: .trailing, spacing: 3) {
             if let bpm = bpmByEntryID[entryID] {
-                Text("\(bpm) BPM")
+                Text("\(Int(bpm.rounded())) BPM")
                     .font(.cadenzaCaption)
                     .foregroundColor(.cadenzaAccent)
                     .lineLimit(1)
@@ -218,7 +231,11 @@ struct AppleMusicStreamingPlaylistView: View {
                     .lineLimit(1)
             }
 
-            if let fit = cadenceFitsByEntryID[entryID], fit.originalBPM != nil {
+            if let bpm = bpmByEntryID[entryID] {
+                let fit = RunningCadenceFit.evaluate(
+                    originalBPM: bpm,
+                    targetCadence: targetCadence
+                )
                 Text(fit.detailText)
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -295,8 +312,7 @@ struct AppleMusicStreamingPlaylistView: View {
     }
 
     private func applyBPM(_ bpm: Double, for lookup: PlaylistEntryBPMLookup) {
-        bpmByEntryID[lookup.entryID] = Int(bpm.rounded())
-        cadenceFitsByEntryID[lookup.entryID] = RunningCadenceFit.evaluate(originalBPM: bpm)
+        bpmByEntryID[lookup.entryID] = bpm
     }
 
     private func bpmLookup(for entry: Playlist.Entry) -> PlaylistEntryBPMLookup {
@@ -327,4 +343,79 @@ private struct PlaylistEntryBPMLookup: Sendable, Hashable {
     let isrc: String?
     let title: String
     let artist: String?
+}
+
+@MainActor
+struct AppleMusicCurrentPlaylistSheet: View {
+    let playlistName: String
+    let entries: [Playlist.Entry]
+    let currentEntryID: String?
+    let bpmValue: (Playlist.Entry) -> Double?
+    let onSelect: (Playlist.Entry) -> Void
+    let onChooseAnotherPlaylist: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(entries, id: \.id) { entry in
+                    Button {
+                        onSelect(entry)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.title)
+                                    .foregroundColor(.cadenzaTextPrimary)
+                                    .lineLimit(2)
+                                Text(entry.artistName)
+                                    .font(.cadenzaCaption)
+                                    .foregroundColor(.cadenzaTextSecondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            if let bpm = bpmValue(entry) {
+                                Text("\(Int(bpm.rounded())) BPM")
+                                    .font(.cadenzaCaption)
+                                    .foregroundColor(.cadenzaTextSecondary)
+                                    .lineLimit(1)
+                            }
+
+                            if currentEntryID == entry.id.rawValue {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .foregroundColor(.cadenzaAccent)
+                                    .accessibilityLabel("현재 재생 중")
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Section {
+                    Button {
+                        onChooseAnotherPlaylist()
+                        dismiss()
+                    } label: {
+                        Label("다른 플레이리스트 선택", systemImage: "rectangle.stack")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .foregroundColor(.cadenzaAccent)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.cadenzaBackground)
+            .navigationTitle(playlistName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
 }

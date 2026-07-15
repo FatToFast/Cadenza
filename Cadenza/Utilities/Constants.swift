@@ -4,47 +4,120 @@ import UIKit
 // MARK: - BPM Ranges
 
 enum BPMRange {
-    static let targetMin: Double = 90
-    static let targetMax: Double = 220
+    static let targetMin: Double = 140
+    static let targetMax: Double = 200
     static let targetDefault: Double = 180
+    static let cadenceAllowance: Double = 10
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
     static let rateMin: Float = 0.5
     static let rateMax: Float = 2.5
-    static let doubleTimeThreshold: Double = 100
 
-    static func automaticTarget(forOriginalBPM originalBPM: Double) -> Double {
-        originalBPM < doubleTimeThreshold ? 90 : 180
+    enum TempoMode: Equatable, Sendable {
+        case originalSpeed
+        case adjustedSpeed
+        case rejected
     }
 
-    /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 originalBPM 대비 재생 배속이
-    /// 1.0에 가장 가까운(|log2(rate)| 최소) 음악적 목표 BPM을 반환.
+    enum TempoRejectionReason: Equatable, Sendable {
+        case invalidOriginalBPM
+    }
+
+    struct TempoPlan: Equatable, Sendable {
+        let baseCadence: Double
+        let allowedCadence: ClosedRange<Double>
+        let musicalTarget: Double
+        let effectiveCadence: Double
+        let requiredPlaybackRate: Double
+        let mode: TempoMode
+        let rejectionReason: TempoRejectionReason?
+
+        var isPlayable: Bool { rejectionReason == nil }
+        var playbackRate: Double { isPlayable ? requiredPlaybackRate : 1.0 }
+    }
+
+    static func validatedOriginalBPM(_ value: Double) -> Double? {
+        guard value.isFinite, (originalMin...originalMax).contains(value) else { return nil }
+        return value
+    }
+
+    static func tempoPlan(targetCadence: Double, originalBPM: Double) -> TempoPlan {
+        let normalizedTarget = targetCadence.isNaN ? targetDefault : targetCadence
+        let base = min(max(normalizedTarget, targetMin), targetMax)
+        let allowed = base...min(base + cadenceAllowance, targetMax)
+
+        guard validatedOriginalBPM(originalBPM) != nil else {
+            return rejectedPlan(
+                base: base,
+                allowed: allowed
+            )
+        }
+
+        let originalSpeedCadences = [0.5, 1.0, 2.0, 4.0].map { originalBPM * $0 }
+        if let effectiveCadence = originalSpeedCadences.first(where: allowed.contains) {
+            return TempoPlan(
+                baseCadence: base,
+                allowedCadence: allowed,
+                musicalTarget: originalBPM,
+                effectiveCadence: effectiveCadence,
+                requiredPlaybackRate: 1.0,
+                mode: .originalSpeed,
+                rejectionReason: nil
+            )
+        }
+
+        let musicalTarget = foldedMusicalTarget(
+            targetCadence: base,
+            originalBPM: originalBPM
+        )
+        let requiredPlaybackRate = musicalTarget / originalBPM
+
+        return TempoPlan(
+            baseCadence: base,
+            allowedCadence: allowed,
+            musicalTarget: musicalTarget,
+            effectiveCadence: base,
+            requiredPlaybackRate: requiredPlaybackRate,
+            mode: .adjustedSpeed,
+            rejectionReason: nil
+        )
+    }
+
+    /// targetCadence × 2^k 후보 중 원곡 BPM 이상인 가장 작은 음악 목표를 반환한다.
+    /// `tempoPlan`의 지원 범위에서는 항상 상향 후보가 존재한다. 더 넓은 값으로 직접
+    /// 호출되더라도 원곡 BPM으로 폴백하므로 이 함수는 감속 목표를 반환하지 않는다.
     ///
     /// 러닝 케이던스는 전역·스티키 값이고, 곡마다 원곡 템포가 다르므로 배속을
     /// 옥타브 폴딩으로 재계산한다. 예) 원곡 85 + 케이던스 170 → 목표 85 (배속 1.0,
-    /// 한 박에 두 걸음). originalBPM <= 0이면 폴딩 근거가 없어 targetCadence를 그대로 반환.
+    /// 한 박에 두 걸음). 유효하지 않은 원곡 BPM이면 폴딩 근거가 없어 targetCadence를 반환한다.
     static func foldedMusicalTarget(targetCadence: Double, originalBPM: Double) -> Double {
-        guard originalBPM > 0 else { return targetCadence }
+        guard originalBPM.isFinite, originalBPM > 0 else { return targetCadence }
         let multipliers: [Double] = [0.25, 0.5, 1.0, 2.0, 4.0]
-        var best = targetCadence
-        var bestDistance = Double.infinity
-        for multiplier in multipliers {
-            let candidate = targetCadence * multiplier
-            let rate = candidate / originalBPM
-            guard rate > 0 else { continue }
-            let distance = abs(log2(rate))
-            if distance < bestDistance {
-                bestDistance = distance
-                best = candidate
-            }
-        }
-        return best
+
+        return multipliers
+            .map { targetCadence * $0 }
+            .filter { $0 >= originalBPM }
+            .min() ?? originalBPM
     }
 
     static func metronomeCadence(forTargetBPM targetBPM: Double) -> Double {
-        let cadence = targetBPM < doubleTimeThreshold ? targetBPM * 2 : targetBPM
-        return min(max(cadence, targetMin), targetMax)
+        min(max(targetBPM, targetMin), targetMax)
+    }
+
+    private static func rejectedPlan(
+        base: Double,
+        allowed: ClosedRange<Double>
+    ) -> TempoPlan {
+        TempoPlan(
+            baseCadence: base,
+            allowedCadence: allowed,
+            musicalTarget: base,
+            effectiveCadence: base,
+            requiredPlaybackRate: 0,
+            mode: .rejected,
+            rejectionReason: .invalidOriginalBPM
+        )
     }
 }
 

@@ -2,6 +2,98 @@ import XCTest
 @testable import Cadenza
 
 final class StreamingBPMResolverTests: XCTestCase {
+    func testPreviewAnalysisRetryPolicyAllowsOneAutomaticAttemptAndManualReset() {
+        var policy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
+
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:one"))
+        policy.recordFailure(identity: "store:one")
+        XCTAssertFalse(policy.shouldAttempt(identity: "store:one"))
+
+        policy.reset(identity: "store:one")
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:one"))
+    }
+
+    func testPreviewAnalysisRetryPolicyTracksIdentitiesIndependently() {
+        var policy = PreviewAnalysisRetryPolicy(maxAutomaticAttempts: 1)
+
+        policy.recordFailure(identity: "store:one")
+
+        XCTAssertFalse(policy.shouldAttempt(identity: "store:one"))
+        XCTAssertTrue(policy.shouldAttempt(identity: "store:two"))
+    }
+
+    func testForcedPreviewAnalysisOverridesRefreshedExternalBPM() async {
+        let externalCounter = PreviewCallCounter()
+        let previewCounter = PreviewCallCounter()
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in
+                await externalCounter.increment()
+                return GetSongBPMService.Result(
+                    bpm: 103,
+                    matchedArtist: "Artist",
+                    matchedTitle: "Song"
+                )
+            },
+            previewAnalysis: {
+                await previewCounter.increment()
+                return Self.previewAnalysis(bpm: 94)
+            }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: StreamingBPMResult(
+                bpm: 103,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            ),
+            shouldTryGetSongBPM: true,
+            shouldTryPreviewAnalysis: true,
+            forcePreviewAnalysis: true,
+            title: "Song",
+            artist: "Artist",
+            appleMusicID: "12345"
+        )
+
+        let externalCallCount = await externalCounter.countValue()
+        let previewCallCount = await previewCounter.countValue()
+        XCTAssertEqual(externalCallCount, 1)
+        XCTAssertEqual(previewCallCount, 1)
+        XCTAssertEqual(resolution.result?.bpm, 94)
+        XCTAssertEqual(resolution.result?.source, .analysis)
+        XCTAssertTrue(resolution.didAttemptGetSongBPM)
+    }
+
+    func testForcedPreviewFailureFallsBackToRefreshedExternalBPM() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in
+                GetSongBPMService.Result(
+                    bpm: 103,
+                    matchedArtist: "Artist",
+                    matchedTitle: "Song"
+                )
+            },
+            previewAnalysis: { nil }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: nil,
+            shouldTryGetSongBPM: true,
+            shouldTryPreviewAnalysis: true,
+            forcePreviewAnalysis: true,
+            title: "Song",
+            artist: "Artist",
+            appleMusicID: "12345"
+        )
+
+        XCTAssertEqual(resolution.result?.bpm, 103)
+        XCTAssertEqual(resolution.result?.source, .metadata)
+        XCTAssertTrue(resolution.didAttemptGetSongBPM)
+    }
+
     func testUsesGetSongBPMBeforePreviewAnalysis() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(
@@ -73,6 +165,188 @@ final class StreamingBPMResolverTests: XCTestCase {
         XCTAssertEqual(resolution.result, cached)
         XCTAssertEqual(previewCallCount, 0)
         XCTAssertFalse(resolution.didAttemptGetSongBPM)
+    }
+
+    func testRejectsUnsupportedCachedBPMAsMissingConfirmation() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: { nil }
+        )
+
+        for bpm in [29.0, 301.0, .nan, .infinity] {
+            let resolution = await resolver.resolve(
+                cachedResult: StreamingBPMResult(
+                    bpm: bpm,
+                    source: .metadata,
+                    beatOffsetSeconds: nil,
+                    beatTimesSeconds: nil,
+                    confidence: nil,
+                    beatSyncStatus: .bpmOnly,
+                    beatSyncIssue: .missingBeatGrid
+                ),
+                shouldTryGetSongBPM: false,
+                shouldTryPreviewAnalysis: false,
+                title: "Invalid",
+                artist: "Artist",
+                appleMusicID: nil
+            )
+            let assessment = BeatSyncReliability.assess(
+                originalBPM: resolution.result?.bpm,
+                confidence: resolution.result?.confidence,
+                beatTimesSeconds: resolution.result?.beatTimesSeconds ?? []
+            )
+
+            XCTAssertNil(resolution.result, "BPM: \(bpm)")
+            XCTAssertEqual(assessment.status, .needsConfirmation, "BPM: \(bpm)")
+            XCTAssertEqual(assessment.issue, .missingBPM, "BPM: \(bpm)")
+        }
+    }
+
+    func testKeepsValidHighAccelerationCachedBPMPlayable() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: { nil }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: StreamingBPMResult(
+                bpm: 120,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            ),
+            shouldTryGetSongBPM: false,
+            shouldTryPreviewAnalysis: false,
+            title: "Valid",
+            artist: "Artist",
+            appleMusicID: nil
+        )
+        let plan = BPMRange.tempoPlan(
+            targetCadence: 180,
+            originalBPM: resolution.result?.bpm ?? 0
+        )
+
+        XCTAssertEqual(resolution.result?.bpm, 120)
+        XCTAssertEqual(resolution.result?.source, .metadata)
+        XCTAssertEqual(resolution.result?.beatSyncStatus, .bpmOnly)
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(plan.playbackRate, 1.5, accuracy: 0.0001)
+    }
+
+    func testInvalidDelayedPreloadPreservesExistingValidResult() {
+        let existingResult = StreamingBPMResult(
+            bpm: 120,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        for bpm in [29.0, 301.0, .nan, .infinity] {
+            let delayedResult = StreamingBPMResult(
+                bpm: bpm,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            )
+            let decision = StreamingBPMPreloadDecision.decide(
+                currentResult: existingResult,
+                delayedResult: delayedResult
+            )
+
+            XCTAssertEqual(
+                decision,
+                .ignore(currentResult: existingResult),
+                "BPM: \(bpm)"
+            )
+            XCTAssertEqual(decision.nextPublishedResult, existingResult, "BPM: \(bpm)")
+        }
+    }
+
+    func testValidDelayedPreloadAppliesResult() {
+        let delayedResult = StreamingBPMResult(
+            bpm: 120,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: nil,
+            delayedResult: delayedResult
+        )
+
+        XCTAssertEqual(decision, .apply(delayedResult))
+        XCTAssertEqual(decision.nextPublishedResult, delayedResult)
+    }
+
+    func testDelayedMetadataPreservesUserRefreshedAnalysisResult() {
+        let analysisResult = StreamingBPMResult(
+            bpm: 94,
+            source: .analysis,
+            beatOffsetSeconds: 0.12,
+            beatTimesSeconds: [0.12, 0.76],
+            confidence: 0.93,
+            beatSyncStatus: .automaticBeatSync,
+            beatSyncIssue: nil
+        )
+        let delayedMetadataResult = StreamingBPMResult(
+            bpm: 103,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: analysisResult,
+            delayedResult: delayedMetadataResult
+        )
+
+        XCTAssertEqual(decision, .ignore(currentResult: analysisResult))
+        XCTAssertEqual(decision.nextPublishedResult, analysisResult)
+    }
+
+    func testDelayedMetadataPreservesManualResult() {
+        let manualResult = StreamingBPMResult(
+            bpm: 96,
+            source: .manual,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+        let delayedMetadataResult = StreamingBPMResult(
+            bpm: 103,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: manualResult,
+            delayedResult: delayedMetadataResult
+        )
+
+        XCTAssertEqual(decision, .ignore(currentResult: manualResult))
+        XCTAssertEqual(decision.nextPublishedResult, manualResult)
     }
 
     func testFallsBackToPreviewAnalysisWhenGetSongBPMHasNoMatch() async {

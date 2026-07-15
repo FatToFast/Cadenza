@@ -38,15 +38,28 @@ final class LiveActivityCoordinator {
             }
             .store(in: &cancellables)
 
-        // 재생 상태/원곡 BPM/목표 BPM/시간 — throttled update
-        Publishers
-            .CombineLatest4(
-                audio.$state,
+        // 재생/일시정지는 즉시 반영한다.
+        audio.$state
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.startOrUpdate(force: true) }
+            }
+            .store(in: &cancellables)
+
+        // BPM/케이던스는 진행 시간 throttle과 분리하되, 슬라이더를 드래그할 때
+        // ActivityKit update가 1 SPM마다 폭주하지 않도록 짧게 debounce한다.
+        Publishers.CombineLatest(
                 audio.$originalBPM,
-                audio.$targetBPM,
-                audio.$currentPlaybackTime
+                audio.$targetBPM
             )
-            .sink { [weak self] _, _, _, _ in
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] _, _ in
+                Task { @MainActor in await self?.startOrUpdate(force: true) }
+            }
+            .store(in: &cancellables)
+
+        // 진행 시간만 페이로드 갱신 빈도를 제한한다.
+        audio.$currentPlaybackTime
+            .sink { [weak self] _ in
                 Task { @MainActor in await self?.startOrUpdate(force: false) }
             }
             .store(in: &cancellables)
@@ -60,11 +73,13 @@ final class LiveActivityCoordinator {
         if !force, now.timeIntervalSince(lastPushedAt) < minUpdateInterval { return }
         lastPushedAt = now
 
+        let plan = audio.tempoPlan
         let state = CadenzaActivityState(
             title: title,
             artist: audio.trackArtist,
-            bpm: Int(audio.originalBPM.rounded()),
-            targetBPM: Int(audio.targetBPM.rounded()),
+            effectiveCadence: roundedInt(plan.effectiveCadence, fallback: Int(BPMRange.targetDefault)),
+            baseCadence: roundedInt(plan.baseCadence, fallback: Int(BPMRange.targetDefault)),
+            originalBPM: confirmedOriginalBPM,
             elapsed: audio.currentPlaybackTime,
             duration: audio.trackDuration,
             isPlaying: audio.state == .playing,
@@ -103,5 +118,18 @@ final class LiveActivityCoordinator {
         image.draw(in: CGRect(origin: .zero, size: target))
         let resized = UIGraphicsGetImageFromCurrentImageContext()
         return resized?.jpegData(compressionQuality: 0.7)
+    }
+
+    private func roundedInt(_ value: Double, fallback: Int) -> Int {
+        guard value.isFinite,
+              let roundedValue = Int(exactly: value.rounded()) else {
+            return fallback
+        }
+        return roundedValue
+    }
+
+    private var confirmedOriginalBPM: Int {
+        guard audio.originalBPMSource != .assumedDefault else { return 0 }
+        return roundedInt(audio.originalBPM, fallback: 0)
     }
 }

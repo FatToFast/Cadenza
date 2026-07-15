@@ -1,5 +1,8 @@
 # PR 3: 큐 자동 전진 + Prefetch + 잠금화면 Remote Control
 
+> [!WARNING]
+> **이 계획의 템포 게이트는 폐기되었다.** 아래의 `rateHardCap`, `.rateOutOfRange`, 케이던스/재생속도 기반 자동 스킵, 120 BPM fallback은 현행 구현 근거로 사용하지 않는다. 현재 정책은 `docs/plans/2026-07-16-acceleration-only-tempo-policy-design.md`와 `docs/plans/2026-07-16-acceleration-only-tempo-policy.md`를 따른다. 30~300 BPM으로 확인된 곡은 감속·거부·템포 기반 자동 스킵 없이 재생하고, BPM이 없거나 범위 밖이면 가정값을 적용하지 않고 확인을 요청한다. 큐·prefetch·잠금화면 관련 본문은 당시 구현계획의 역사적 맥락으로만 보존한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Apple Music 플레이리스트를 선택하면 전체 트랙이 큐에 적재되고 자동 전진 재생. 백그라운드 + 잠금화면 컨트롤. `targetBPM` 하나로 일관 연습.

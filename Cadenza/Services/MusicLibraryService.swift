@@ -95,6 +95,9 @@ struct MusicLibraryService: MusicLibrary {
     private static func makeTrack(from item: MPMediaItem) -> AppleMusicTrack {
         let bpmNumber = item.value(forProperty: MPMediaItemPropertyBeatsPerMinute) as? NSNumber
         let bpm = bpmNumber?.intValue
+        let validatedBPM = bpm.flatMap { value in
+            BPMRange.validatedOriginalBPM(Double(value)).map { _ in value }
+        }
         let title = item.title?.isEmpty == false ? item.title! : "Untitled Track"
 
         return AppleMusicTrack(
@@ -105,7 +108,7 @@ struct MusicLibraryService: MusicLibrary {
             artist: item.artist,
             albumTitle: item.albumTitle,
             assetURL: item.assetURL,
-            beatsPerMinute: bpm.flatMap { $0 > 0 ? $0 : nil },
+            beatsPerMinute: validatedBPM,
             isCloudItem: item.isCloudItem
         )
     }

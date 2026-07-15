@@ -49,9 +49,8 @@ final class AudioManagerOverrideIntegrationTests: XCTestCase {
         XCTAssertEqual(second.originalBPMSource, .manual)
     }
 
-    /// applyAutoBPMDefault는 사용자가 명시적으로 선택한 게 아니므로 store에 저장하면 안 된다.
-    /// 두 번째 인스턴스 로드 시에는 override가 없어야 한다.
-    func testAutoBPMDefaultDoesNotPersist() async throws {
+    /// 분석으로 감지된 BPM은 사용자가 명시적으로 선택한 값이 아니므로 store에 저장하면 안 된다.
+    func testDetectedBPMDoesNotPersistAsManualOverride() async throws {
         let store = makeStore()
 
         let first = AudioManager(bpmOverrideStore: store)
@@ -60,10 +59,14 @@ final class AudioManagerOverrideIntegrationTests: XCTestCase {
             throw XCTSkip("샘플 로드 실패")
         }
 
-        // BPM이 metadata로 로드되었다고 가정하고, ambiguous한 후보 중 자동 디폴트만 적용
-        first.applyAutoBPMDefault(174)
+        first.setStreamingBeatAlignment(
+            bpm: 174,
+            source: .analysis,
+            beatOffsetSeconds: nil
+        )
+        XCTAssertEqual(first.originalBPM, 174)
+        XCTAssertEqual(first.originalBPMSource, .analysis)
 
-        // store는 비어있어야 함
         let second = AudioManager(bpmOverrideStore: store)
         await second.loadSampleTrack(.clickLoop)
         XCTAssertNotEqual(
@@ -72,8 +75,8 @@ final class AudioManagerOverrideIntegrationTests: XCTestCase {
         )
     }
 
-    /// applyAutoBPMDefault는 source가 manual이면 무시되어야 한다 — 사용자 의도 보호.
-    func testAutoBPMDefaultIgnoredWhenManual() async throws {
+    /// 같은 곡에 대한 다음 수동 선택은 이전 override를 갱신해야 한다.
+    func testLatestManualBPMChoicePersists() async throws {
         let store = makeStore()
         let audio = AudioManager(bpmOverrideStore: store)
         await audio.loadSampleTrack(.clickLoop)
@@ -81,10 +84,12 @@ final class AudioManagerOverrideIntegrationTests: XCTestCase {
 
         audio.setOriginalBPM(160)
         XCTAssertEqual(audio.originalBPMSource, .manual)
+        audio.setOriginalBPM(80)
 
-        audio.applyAutoBPMDefault(80)
+        let restored = AudioManager(bpmOverrideStore: store)
+        await restored.loadSampleTrack(.clickLoop)
 
-        XCTAssertEqual(audio.originalBPM, 160, "manual BPM이 auto-default에 의해 덮어쓰임")
-        XCTAssertEqual(audio.originalBPMSource, .manual)
+        XCTAssertEqual(restored.originalBPM, 80)
+        XCTAssertEqual(restored.originalBPMSource, .manual)
     }
 }

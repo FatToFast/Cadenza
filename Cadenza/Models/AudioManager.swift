@@ -79,7 +79,12 @@ final class AudioManager: ObservableObject {
     @Published private(set) var state: PlaybackState = .idle
     @Published var targetBPM: Double = BPMRange.targetDefault {
         didSet {
-            UserDefaults.standard.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
+            let normalized = Self.normalizedTargetCadence(targetBPM)
+            guard targetBPM == normalized else {
+                targetBPM = normalized
+                return
+            }
+            defaults.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
             updateRate()
             restartMetronomeIfNeeded()
         }
@@ -98,31 +103,60 @@ final class AudioManager: ObservableObject {
     @Published private(set) var beatSyncIssue: BeatSyncReliabilityIssue? = .missingBPM
     @Published private(set) var manualBeatOffsetNudge: TimeInterval = 0
     @Published var metronomeEnabled: Bool = MetronomeDefaults.enabled {
-        didSet { handleMetronomeEnabledChange() }
+        didSet {
+            defaults.set(metronomeEnabled, forKey: Self.metronomeEnabledDefaultsKey)
+            handleMetronomeEnabledChange()
+        }
     }
     @Published var metronomeVolume: Float = MetronomeDefaults.volume {
-        didSet { metronomeNode.volume = metronomeVolume }
+        didSet {
+            let normalized = Self.normalizedMetronomeVolume(metronomeVolume)
+            guard metronomeVolume == normalized else {
+                metronomeVolume = normalized
+                return
+            }
+            defaults.set(Double(metronomeVolume), forKey: Self.metronomeVolumeDefaultsKey)
+            metronomeNode.volume = metronomeVolume
+        }
+    }
+
+    var tempoPlan: BPMRange.TempoPlan {
+        BPMRange.tempoPlan(targetCadence: targetBPM, originalBPM: originalBPM)
     }
 
     /// targetBPM(러닝 케이던스)를 원곡 템포에 옥타브 폴딩한 "음악의 목표 템포".
-    /// 재생 배속·메트로놈 세분화는 케이던스가 아니라 이 값을 기준으로 삼는다.
     var musicalTargetBPM: Double {
-        BPMRange.foldedMusicalTarget(targetCadence: targetBPM, originalBPM: originalBPM)
+        tempoPlan.musicalTarget
+    }
+
+    var effectiveCadence: Double {
+        tempoPlan.effectiveCadence
     }
 
     var playbackRate: Double {
-        guard originalBPM > 0 else { return 1.0 }
-        let rate = musicalTargetBPM / originalBPM
-        return min(max(rate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
+        guard originalBPMSource != .assumedDefault else { return 1.0 }
+        return tempoPlan.playbackRate
     }
 
     var metronomeBPM: Double {
-        BPMRange.metronomeCadence(forTargetBPM: targetBPM)
+        effectiveCadence
+    }
+
+    var isCurrentTempoPlayable: Bool {
+        originalBPMSource != .assumedDefault && tempoPlan.isPlayable
     }
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
     var hasLoadedTrack: Bool { audioFile != nil }
-    var canStartPlayback: Bool { audioFile != nil || canRunMetronomeForCurrentBeatSync }
+    var hasActiveLocalTrackResource: Bool {
+        currentTrackURL != nil || currentAccessedURL != nil
+    }
+    var canStartPlayback: Bool {
+        if audioFile != nil {
+            return isCurrentTempoPlayable
+        }
+        return canRunMetronomeForCurrentBeatSync
+    }
     var needsOriginalBPMInput: Bool { audioFile != nil && originalBPMSource == .assumedDefault }
     var playbackProgress: Double {
         guard trackDuration > 0 else { return 0 }
@@ -192,7 +226,9 @@ final class AudioManager: ObservableObject {
     private var currentAccessedURL: URL?
     private var currentTrackURL: URL?
     private var currentTrackOverrideKey: String?
+    private let defaults: UserDefaults
     private let bpmOverrideStore: TrackBPMOverrideStore
+    private let localLoadCommitBarrier: @MainActor (URL) async -> Void
     private var isAudioSessionConfigured = false
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
@@ -209,17 +245,49 @@ final class AudioManager: ObservableObject {
 
     /// 러닝 케이던스(targetBPM)는 전역·스티키·영속 값이다. 곡이 바뀌어도 유지된다.
     static let targetCadenceDefaultsKey = "com.jy.cadenza.targetCadence"
+    static let metronomeEnabledDefaultsKey = "com.jy.cadenza.metronomeEnabled"
+    static let metronomeVolumeDefaultsKey = "com.jy.cadenza.metronomeVolume"
 
-    init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
+    init(
+        defaults: UserDefaults = .standard,
+        bpmOverrideStore: TrackBPMOverrideStore = .shared,
+        localLoadCommitBarrier: @escaping @MainActor (URL) async -> Void = { _ in }
+    ) {
+        self.defaults = defaults
         self.bpmOverrideStore = bpmOverrideStore
+        self.localLoadCommitBarrier = localLoadCommitBarrier
         // init 내 대입은 didSet을 부르지 않으므로 초기 로드는 안전(재저장 루프 없음).
-        let storedCadence = UserDefaults.standard.double(forKey: Self.targetCadenceDefaultsKey)
-        if storedCadence >= BPMRange.targetMin, storedCadence <= BPMRange.targetMax {
-            targetBPM = storedCadence
+        if defaults.object(forKey: Self.targetCadenceDefaultsKey) != nil {
+            targetBPM = Self.normalizedTargetCadence(
+                defaults.double(forKey: Self.targetCadenceDefaultsKey)
+            )
+        }
+        if defaults.object(forKey: Self.metronomeEnabledDefaultsKey) != nil {
+            metronomeEnabled = defaults.bool(forKey: Self.metronomeEnabledDefaultsKey)
+        }
+        if defaults.object(forKey: Self.metronomeVolumeDefaultsKey) != nil {
+            metronomeVolume = Self.normalizedStoredMetronomeVolume(
+                defaults.double(forKey: Self.metronomeVolumeDefaultsKey)
+            )
         }
         setupEngine()
         observeInterruptions()
         observeRouteChanges()
+    }
+
+    private static func normalizedTargetCadence(_ value: Double) -> Double {
+        guard value.isFinite else { return BPMRange.targetDefault }
+        return min(max(value, BPMRange.targetMin), BPMRange.targetMax)
+    }
+
+    private static func normalizedMetronomeVolume(_ value: Float) -> Float {
+        guard value.isFinite else { return MetronomeDefaults.volume }
+        return min(max(value, 0), 1)
+    }
+
+    private static func normalizedStoredMetronomeVolume(_ value: Double) -> Float {
+        guard value.isFinite else { return MetronomeDefaults.volume }
+        return Float(min(max(value, 0), 1))
     }
 
     deinit {
@@ -336,10 +404,27 @@ final class AudioManager: ObservableObject {
 
     // MARK: - File Loading
 
-    func loadFile(url: URL) async {
+    @discardableResult
+    func loadFile(url: URL) async -> Bool {
+        await loadDirectFile(url: url) != nil
+    }
+
+    private func loadDirectFile(url: URL) async -> Int? {
+        await loadFileForPlayback(url: url)
+    }
+
+    private func loadFileForPlayback(
+        url: URL,
+        expectedQueueItemID: String? = nil
+    ) async -> Int? {
         trackGeneration += 1
         let gen = trackGeneration
-        await loadFile(url: url, generation: gen)
+        let didCommit = await loadFile(
+            url: url,
+            generation: gen,
+            expectedQueueItemID: expectedQueueItemID
+        )
+        return didCommit ? gen : nil
     }
 
     // MARK: - Local Playlist
@@ -351,12 +436,15 @@ final class AudioManager: ObservableObject {
             $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
         }
         guard !sorted.isEmpty else { return }
-        var playlist = LocalFilePlaylist(fileURLs: sorted)
+        let playlist = LocalFilePlaylist(fileURLs: sorted)
         guard let item = playlist.currentItem, case .file(let url) = item.source else { return }
         localPlaylist = playlist
         syncPlaybackEndBehavior()
-        await loadFile(url: url)
-        if autoPlay, state == .ready { play() }
+        await loadPlaylistTrack(
+            item: item,
+            url: url,
+            autoPlay: autoPlay
+        )
     }
 
     /// 외부에서 단일 곡 로드 시 (Apple Music 보관함 import 등) — 플레이리스트 비우기.
@@ -365,14 +453,47 @@ final class AudioManager: ObservableObject {
         syncPlaybackEndBehavior()
     }
 
+    /// 스트리밍 소스로 전환하기 전에 진행 중인 로컬 로드만 폐기한다.
+    /// 이미 커밋된 로컬 트랙은 보존해 소스 전환 자체가 불필요하게 파괴적이지 않게 한다.
+    func prepareForStreamingPlayback() {
+        pendingPresetBPMHint = nil
+        localPlaylist = LocalFilePlaylist()
+        syncPlaybackEndBehavior()
+
+        guard state == .loading else { return }
+        trackGeneration &+= 1
+
+        playerNode.stop()
+        playerNode.reset()
+        isExternalMetronomePlaybackActive = false
+        stopMetronome()
+        hasScheduledPlayback = false
+        isScheduling = false
+        scheduledLoopStartFrame = 0
+        currentScheduledStartFrame = 0
+        stopProgressUpdates()
+        if engine.isRunning {
+            engine.stop()
+        }
+
+        releaseCurrentURL()
+        currentTrackURL = nil
+        currentTrackOverrideKey = nil
+        audioFile = nil
+        state = .idle
+    }
+
     func nextLocalTrack() async {
         let shouldAutoPlay = state == .playing
         var playlist = localPlaylist
-        guard let item = playlist.moveToNext(), case .file(let url) = item.source else { return }
+        guard let item = playlist.moveToNextPlayable(), case .file(let url) = item.source else { return }
         localPlaylist = playlist
         syncPlaybackEndBehavior()
-        await loadFile(url: url)
-        if shouldAutoPlay, state == .ready { play() }
+        await loadPlaylistTrack(
+            item: item,
+            url: url,
+            autoPlay: shouldAutoPlay
+        )
     }
 
     func previousLocalTrack() async {
@@ -381,8 +502,11 @@ final class AudioManager: ObservableObject {
         guard let item = playlist.moveToPrevious(), case .file(let url) = item.source else { return }
         localPlaylist = playlist
         syncPlaybackEndBehavior()
-        await loadFile(url: url)
-        if shouldAutoPlay, state == .ready { play() }
+        await loadPlaylistTrack(
+            item: item,
+            url: url,
+            autoPlay: shouldAutoPlay
+        )
     }
 
     /// 큐 시트에서 사용자가 곡을 직접 선택했을 때 호출. 같은 곡이면 noop.
@@ -395,8 +519,11 @@ final class AudioManager: ObservableObject {
               case .file(let url) = item.source else { return }
         localPlaylist = playlist
         syncPlaybackEndBehavior()
-        await loadFile(url: url)
-        if shouldAutoPlay, state == .ready { play() }
+        await loadPlaylistTrack(
+            item: item,
+            url: url,
+            autoPlay: shouldAutoPlay
+        )
     }
 
     func toggleLocalShuffle() {
@@ -411,11 +538,14 @@ final class AudioManager: ObservableObject {
         guard !localPlaylist.isEmpty else { return }
         var playlist = localPlaylist
 
-        if let item = playlist.moveToNext(), case .file(let url) = item.source {
+        if let item = playlist.moveToNextPlayable(), case .file(let url) = item.source {
             localPlaylist = playlist
             syncPlaybackEndBehavior()
-            await loadFile(url: url)
-            if state == .ready { play() }
+            await loadPlaylistTrack(
+                item: item,
+                url: url,
+                autoPlay: true
+            )
             return
         }
 
@@ -423,9 +553,27 @@ final class AudioManager: ObservableObject {
         if localRepeatEnabled, let item = playlist.moveToStart(), case .file(let url) = item.source {
             localPlaylist = playlist
             syncPlaybackEndBehavior()
-            await loadFile(url: url)
-            if state == .ready { play() }
+            await loadPlaylistTrack(
+                item: item,
+                url: url,
+                autoPlay: true
+            )
         }
+    }
+
+    private func loadPlaylistTrack(
+        item: QueueItem,
+        url: URL,
+        autoPlay: Bool
+    ) async {
+        let committedGeneration = await loadFileForPlayback(
+            url: url,
+            expectedQueueItemID: item.id
+        )
+
+        guard localPlaylist.currentItem?.id == item.id else { return }
+        guard committedGeneration != nil, state == .ready else { return }
+        if autoPlay { play() }
     }
 
     private func syncPlaybackEndBehavior() {
@@ -444,14 +592,21 @@ final class AudioManager: ObservableObject {
         artist: String?,
         bpmHint: Double?
     ) async {
-        pendingPresetBPMHint = bpmHint
-        await loadFile(url: url)
+        let validatedBPMHint = bpmHint.flatMap(BPMRange.validatedOriginalBPM)
+        pendingPresetBPMHint = validatedBPMHint
+        let committedGeneration = await loadDirectFile(url: url)
 
-        if state == .ready {
+        if let committedGeneration,
+           isCurrentLocalLoad(
+            generation: committedGeneration,
+            url: url,
+            expectedQueueItemID: nil
+           ),
+           state == .ready {
             trackTitle = title
             trackArtist = artist
-            if let bpmHint, originalBPMSource == .assumedDefault {
-                originalBPM = bpmHint
+            if let validatedBPMHint, originalBPMSource == .assumedDefault {
+                originalBPM = validatedBPMHint
                 _bpmFromMetadata = false
                 originalBPMSource = .metadata
                 applyTempoPolicy()
@@ -459,10 +614,19 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    private func loadFile(url: URL, generation: Int) async {
-        self.trackGeneration = generation
-        // `pendingPresetBPMHint`은 호출자(loadSampleTrack)가 set — 분석 후 항상 정리한다.
-        defer { pendingPresetBPMHint = nil }
+    private func loadFile(
+        url: URL,
+        generation: Int,
+        expectedQueueItemID: String?
+    ) async -> Bool {
+        guard isCurrentLocalLoad(
+            generation: generation,
+            url: nil,
+            expectedQueueItemID: expectedQueueItemID
+        ) else { return false }
+        let presetBPMHint = pendingPresetBPMHint
+        pendingPresetBPMHint = nil
+
         // [P1 fix] 기존 재생 큐 정리: 이전 트랙이 남아 있으면 깨끗이 정리
         playerNode.stop()
         playerNode.reset()
@@ -511,99 +675,156 @@ final class AudioManager: ObservableObject {
 
         do {
             let file = try AVAudioFile(forReading: url)
-            self.audioFile = file
-            trackDuration = Double(file.length) / file.processingFormat.sampleRate
+            let loadedDuration = Double(file.length) / file.processingFormat.sampleRate
 
             // 트랙 메타데이터 읽기
             let asset = AVAsset(url: url)
+            let loadedTitle: String
+            let loadedArtist: String?
             if let metadata = try? await asset.load(.metadata) {
-                trackTitle = await Self.loadMetadataString(
+                loadedTitle = await Self.loadMetadataString(
                     from: metadata,
                     identifier: .commonIdentifierTitle
                 ) ?? url.deletingPathExtension().lastPathComponent
-                trackArtist = await Self.loadMetadataString(
+                loadedArtist = await Self.loadMetadataString(
                     from: metadata,
                     identifier: .commonIdentifierArtist
                 )
             } else {
-                trackTitle = url.deletingPathExtension().lastPathComponent
+                loadedTitle = url.deletingPathExtension().lastPathComponent
+                loadedArtist = nil
             }
 
             // 아트워크 로딩 (Now Playing Info Center 공급용)
             let artworkData = await Self.loadArtworkData(from: asset)
-            guard generation == trackGeneration else { return }
-            currentArtworkData = artworkData
+            guard isCurrentLocalLoad(
+                generation: generation,
+                url: url,
+                expectedQueueItemID: expectedQueueItemID
+            ) else { return false }
 
             // 곡 영구 BPM override를 위한 identity 키
             let overrideKey = TrackBPMOverrideStore.identityKey(
                 .fileMetadata(
-                    title: trackTitle,
-                    artist: trackArtist,
+                    title: loadedTitle,
+                    artist: loadedArtist,
                     lastPathComponent: url.lastPathComponent
                 )
             )
-            currentTrackOverrideKey = overrideKey
             let storedOverride = bpmOverrideStore.bpm(forIdentity: overrideKey)
 
             // BPM 메타데이터 읽기
             let metadataBPM = await BPMMetadataReader.readBPM(from: url)
-            if let bpm = metadataBPM {
-                originalBPM = bpm
-                _bpmFromMetadata = true
-                originalBPMSource = .metadata
-                beatSyncStatus = .bpmOnly
-                beatSyncIssue = .missingBeatGrid
-                logger.info("[track_loaded] BPM from metadata: \(bpm)")
-            } else {
-                originalBPM = BPMRange.originalDefault
-                _bpmFromMetadata = false
-                originalBPMSource = .assumedDefault
-                beatSyncStatus = .needsConfirmation
-                beatSyncIssue = .missingBPM
-                logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
-            }
+            guard isCurrentLocalLoad(
+                generation: generation,
+                url: url,
+                expectedQueueItemID: expectedQueueItemID
+            ) else { return false }
 
-            let analysisHint = metadataBPM ?? pendingPresetBPMHint
+            let analysisHint = metadataBPM ?? presetBPMHint
             let alignmentResult = try? await (
                 Task.detached(priority: .userInitiated) {
                     try BeatAlignmentAnalyzer.loadOrAnalyze(url: url, expectedBPM: analysisHint)
                 }.value
             )
-            beatAlignmentCacheStatus = alignmentResult?.cacheStatus ?? .none
+            guard isCurrentLocalLoad(
+                generation: generation,
+                url: url,
+                expectedQueueItemID: expectedQueueItemID
+            ) else { return false }
 
-            if let analysis = alignmentResult?.analysis {
-                beatAlignmentAnalysis = analysis
-                beatAlignmentConfidence = analysis.confidence
-                manualBeatOffsetNudge = analysis.manualNudgeSeconds
-                applyBeatSyncAssessment(from: analysis)
+            var loadedBPM = metadataBPM ?? BPMRange.originalDefault
+            var loadedBPMSource: OriginalBPMSource = metadataBPM == nil ? .assumedDefault : .metadata
+            var loadedBPMFromMetadata = metadataBPM != nil
+            var loadedBeatSyncStatus: BeatSyncStatus = metadataBPM == nil ? .needsConfirmation : .bpmOnly
+            var loadedBeatSyncIssue: BeatSyncReliabilityIssue? = metadataBPM == nil
+                ? .missingBPM
+                : .missingBeatGrid
+            let loadedAnalysis = alignmentResult?.analysis
+            let loadedCacheStatus = alignmentResult?.cacheStatus ?? .none
+            let loadedConfidence = loadedAnalysis?.confidence
+            let loadedManualNudge = loadedAnalysis?.manualNudgeSeconds ?? 0
+            var loadedBeatOffset: TimeInterval = 0
+            var loadedBeatTimes: [TimeInterval] = []
+
+            if let analysis = loadedAnalysis {
+                let effectiveTimes = effectiveBeatTimes(for: analysis)
+                let assessment = BeatSyncReliability.assess(
+                    originalBPM: analysis.estimatedBPM,
+                    confidence: analysis.confidence,
+                    beatTimesSeconds: effectiveTimes
+                )
+                loadedBeatSyncStatus = assessment.status
+                loadedBeatSyncIssue = assessment.issue
+                loadedBeatOffset = assessment.shouldUseBeatGrid ? effectiveOffset(for: analysis) : 0
+                loadedBeatTimes = assessment.shouldUseBeatGrid ? effectiveTimes : []
                 if metadataBPM == nil {
-                    originalBPM = analysis.estimatedBPM
-                    _bpmFromMetadata = false
-                    originalBPMSource = .analysis
-                    logger.info("[track_loaded] BPM from audio analysis: \(analysis.estimatedBPM)")
+                    loadedBPM = analysis.estimatedBPM
+                    loadedBPMSource = .analysis
+                    loadedBPMFromMetadata = false
                 }
-                logger.info("[track_loaded] Beat offset from analysis: \(analysis.beatOffsetSeconds)s beatCount=\(analysis.beatTimesSeconds?.count ?? 0) confidence=\(analysis.confidence) cache=\(self.beatAlignmentCacheStatus.rawValue)")
             }
 
             // 사용자 override는 모든 자동 결정보다 우선
             if let storedOverride,
                storedOverride >= BPMRange.originalMin,
                storedOverride <= BPMRange.originalMax {
-                originalBPM = storedOverride
-                _bpmFromMetadata = false
-                originalBPMSource = .manual
-                beatSyncStatus = .bpmOnly
-                beatSyncIssue = .missingBeatGrid
-                sourceBeatOffsetSeconds = 0
-                sourceBeatTimesSeconds = []
-                logger.info("[track_loaded] Applied user BPM override: \(storedOverride)")
+                loadedBPM = storedOverride
+                loadedBPMFromMetadata = false
+                loadedBPMSource = .manual
+                loadedBeatSyncStatus = .bpmOnly
+                loadedBeatSyncIssue = .missingBeatGrid
+                loadedBeatOffset = 0
+                loadedBeatTimes = []
             }
 
+            await localLoadCommitBarrier(url)
+            guard isCurrentLocalLoad(
+                generation: generation,
+                url: url,
+                expectedQueueItemID: expectedQueueItemID
+            ) else { return false }
+
+            audioFile = file
+            trackDuration = loadedDuration
+            trackTitle = loadedTitle
+            trackArtist = loadedArtist
+            currentArtworkData = artworkData
+            currentTrackOverrideKey = overrideKey
+            originalBPM = loadedBPM
+            originalBPMSource = loadedBPMSource
+            _bpmFromMetadata = loadedBPMFromMetadata
+            beatAlignmentAnalysis = loadedAnalysis
+            beatAlignmentConfidence = loadedConfidence
+            beatAlignmentCacheStatus = loadedCacheStatus
+            beatSyncStatus = loadedBeatSyncStatus
+            beatSyncIssue = loadedBeatSyncIssue
+            manualBeatOffsetNudge = loadedManualNudge
+            sourceBeatOffsetSeconds = loadedBeatOffset
+            sourceBeatTimesSeconds = loadedBeatTimes
+            stopMetronomeIfBeatSyncRejected()
             applyTempoPolicy()
             state = .ready
+            if let storedOverride,
+               storedOverride >= BPMRange.originalMin,
+               storedOverride <= BPMRange.originalMax {
+                logger.info("[track_loaded] Applied user BPM override: \(storedOverride)")
+            } else if let metadataBPM {
+                logger.info("[track_loaded] BPM from metadata: \(metadataBPM)")
+            } else if let loadedAnalysis {
+                logger.info("[track_loaded] BPM from audio analysis: \(loadedAnalysis.estimatedBPM)")
+            } else {
+                logger.info("[track_loaded] No BPM metadata, using default \(BPMRange.originalDefault)")
+            }
             logger.info("[track_loaded] \(url.lastPathComponent) loaded successfully")
+            return true
 
         } catch {
+            guard isCurrentLocalLoad(
+                generation: generation,
+                url: url,
+                expectedQueueItemID: expectedQueueItemID
+            ) else { return false }
             audioFile = nil
             originalBPM = BPMRange.originalDefault
             originalBPMSource = .assumedDefault
@@ -614,7 +835,21 @@ final class AudioManager: ObservableObject {
             // 로드 실패 시 권한도 반납
             releaseCurrentURL()
             logger.error("[F-01] File load failed: \(error.localizedDescription)")
+            return false
         }
+    }
+
+    private func isCurrentLocalLoad(
+        generation: Int,
+        url: URL?,
+        expectedQueueItemID: String?
+    ) -> Bool {
+        guard generation == trackGeneration else { return false }
+        if let url, currentTrackURL != url { return false }
+        if let expectedQueueItemID {
+            return localPlaylist.currentItem?.id == expectedQueueItemID
+        }
+        return true
     }
 
     func loadSampleTrack(_ preset: SampleTrackPreset = .clickLoop) async {
@@ -630,9 +865,15 @@ final class AudioManager: ObservableObject {
             }
 
             pendingPresetBPMHint = preset.bpm
-            await loadFile(url: sampleURL)
+            let committedGeneration = await loadDirectFile(url: sampleURL)
 
-            if state == .ready {
+            if let committedGeneration,
+               isCurrentLocalLoad(
+                generation: committedGeneration,
+                url: sampleURL,
+                expectedQueueItemID: nil
+               ),
+               state == .ready {
                 trackTitle = preset.title
                 trackArtist = preset.artist
                 // Preset BPM fallback applies only when no stronger source already set
@@ -846,21 +1087,6 @@ final class AudioManager: ObservableObject {
         applyTempoPolicy()
     }
 
-    /// half/double-time 후보 중 목표 케이던스에 가까운 BPM을 임시로 적용한다.
-    /// 사용자가 명시적으로 선택한 것이 아니므로 영구 저장하지 않고
-    /// `originalBPMSource`도 바꾸지 않아 UI에 후보 버튼이 계속 보인다.
-    func applyAutoBPMDefault(_ bpm: Double) {
-        guard bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
-        guard originalBPMSource != .manual else { return }
-        guard abs(originalBPM - bpm) > 0.5 else {
-            applyTempoPolicy()
-            return
-        }
-        originalBPM = bpm
-        _bpmFromMetadata = false
-        applyTempoPolicy()
-    }
-
     func setStreamingOriginalBPM(_ bpm: Double?, source: OriginalBPMSource = .metadata) {
         setStreamingBeatAlignment(bpm: bpm, source: source, beatOffsetSeconds: nil)
     }
@@ -872,7 +1098,7 @@ final class AudioManager: ObservableObject {
         beatTimesSeconds: [TimeInterval]? = nil,
         confidence: Double? = nil
     ) {
-        guard let bpm, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+        guard let bpm = bpm.flatMap(BPMRange.validatedOriginalBPM) else {
             originalBPM = BPMRange.originalDefault
             _bpmFromMetadata = false
             originalBPMSource = .assumedDefault
@@ -1232,25 +1458,14 @@ final class AudioManager: ObservableObject {
     }
 
     private var metronomeBeatTimesSeconds: [TimeInterval] {
-        guard metronomeBPM > musicalTargetBPM * 1.5 else { return sourceBeatTimesSeconds }
-        return doubledBeatTimes(sourceBeatTimesSeconds)
-    }
-
-    private func doubledBeatTimes(_ beatTimes: [TimeInterval]) -> [TimeInterval] {
-        guard beatTimes.count >= 2 else { return beatTimes }
-
-        var doubled: [TimeInterval] = []
-        doubled.reserveCapacity(beatTimes.count * 2 - 1)
-        for index in beatTimes.indices {
-            let beatTime = beatTimes[index]
-            doubled.append(beatTime)
-
-            let nextIndex = beatTimes.index(after: index)
-            if beatTimes.indices.contains(nextIndex) {
-                doubled.append((beatTime + beatTimes[nextIndex]) / 2)
-            }
-        }
-        return doubled
+        let multiplier = BeatGridCadenceInterpolator.multiplier(
+            effectiveCadence: metronomeBPM,
+            musicalTargetBPM: musicalTargetBPM
+        )
+        return BeatGridCadenceInterpolator.subdivide(
+            beatTimesSeconds: sourceBeatTimesSeconds,
+            multiplier: multiplier
+        )
     }
 
     private func startProgressUpdates() {

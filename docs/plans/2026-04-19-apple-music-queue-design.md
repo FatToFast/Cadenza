@@ -1,5 +1,8 @@
 # Apple Music 보관함 플레이리스트 큐 import 설계
 
+> [!WARNING]
+> **템포 정책 부분은 폐기된 역사 기록이다.** 아래의 `rateHardCap`, `.rateOutOfRange`, 케이던스/재생속도 기반 자동 스킵, 120 BPM fallback은 현행 구현 근거로 사용하지 않는다. 현재 정책은 `docs/plans/2026-07-16-acceleration-only-tempo-policy-design.md`와 `docs/plans/2026-07-16-acceleration-only-tempo-policy.md`를 따른다. 30~300 BPM으로 확인된 곡은 감속·거부·템포 기반 자동 스킵 없이 재생하고, BPM이 없거나 범위 밖이면 가정값을 적용하지 않고 확인을 요청한다. 아래 본문은 당시 큐 설계의 역사적 맥락으로만 보존한다.
+
 날짜: 2026-04-19  
 상태: 초안 (브레인스토밍 완료, 구현 계획 작성 대기)
 
