@@ -1098,7 +1098,7 @@ final class AudioManager: ObservableObject {
         beatTimesSeconds: [TimeInterval]? = nil,
         confidence: Double? = nil
     ) {
-        guard let bpm, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+        guard let bpm = bpm.flatMap(BPMRange.validatedOriginalBPM) else {
             originalBPM = BPMRange.originalDefault
             _bpmFromMetadata = false
             originalBPMSource = .assumedDefault

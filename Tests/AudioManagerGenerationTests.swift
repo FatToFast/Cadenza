@@ -369,6 +369,40 @@ final class AudioManagerGenerationTests: XCTestCase {
         }
     }
 
+    func testStreamingBeatAlignmentRejectsUnsupportedAndNonfiniteBPM() {
+        for bpm in [29.0, 301.0, .nan, .infinity] {
+            let audio = AudioManager()
+
+            audio.setStreamingBeatAlignment(
+                bpm: bpm,
+                source: .metadata,
+                beatOffsetSeconds: nil
+            )
+
+            XCTAssertEqual(audio.originalBPM, BPMRange.originalDefault, "BPM: \(bpm)")
+            XCTAssertEqual(audio.originalBPMSource, .assumedDefault, "BPM: \(bpm)")
+            XCTAssertEqual(audio.beatSyncStatus, .needsConfirmation, "BPM: \(bpm)")
+            XCTAssertEqual(audio.beatSyncIssue, .missingBPM, "BPM: \(bpm)")
+        }
+    }
+
+    func testStreamingBeatAlignmentAcceptsSupportedBPMBoundaries() {
+        for bpm in [30.0, 300.0] {
+            let audio = AudioManager()
+
+            audio.setStreamingBeatAlignment(
+                bpm: bpm,
+                source: .metadata,
+                beatOffsetSeconds: nil
+            )
+
+            XCTAssertEqual(audio.originalBPM, bpm, accuracy: 0.0001)
+            XCTAssertEqual(audio.originalBPMSource, .metadata)
+            XCTAssertEqual(audio.beatSyncStatus, .bpmOnly)
+            XCTAssertEqual(audio.beatSyncIssue, .missingBeatGrid)
+        }
+    }
+
     func testStreamingQueuePolicyContextTransitionsBetweenSongAndPlaylist() {
         var context = StreamingQueuePolicyContext.playlist(identity: "playlist-entry")
 

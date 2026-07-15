@@ -281,28 +281,6 @@ final class QueueItemTests: XCTestCase {
         )
     }
 
-    func testStreamingEntryOriginStaysExplicitForRequestedIndex() {
-        XCTAssertEqual(
-            StreamingEntryOrigin.resolved(
-                requestedIndex: 6,
-                previousIndex: 6,
-                observedIndex: 6
-            ),
-            .explicitSelection
-        )
-    }
-
-    func testStreamingEntryOriginBecomesQueueAdvanceWhenObservedIndexChanges() {
-        XCTAssertEqual(
-            StreamingEntryOrigin.resolved(
-                requestedIndex: nil,
-                previousIndex: 6,
-                observedIndex: 7
-            ),
-            .queueAdvance
-        )
-    }
-
     func testStreamingQueueCommandSnapshotRejectsSelectionGenerationChange() {
         let snapshot = StreamingQueueCommandSnapshot(
             selectionGeneration: 7,

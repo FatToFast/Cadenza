@@ -185,25 +185,6 @@ struct StreamingTempoPolicyGate: Sendable, Equatable {
     }
 }
 
-enum StreamingEntryOrigin: Sendable, Equatable {
-    case explicitSelection
-    case queueAdvance
-
-    static func resolved(
-        requestedIndex: Int?,
-        previousIndex: Int?,
-        observedIndex: Int
-    ) -> Self {
-        if let requestedIndex {
-            return requestedIndex == observedIndex ? .explicitSelection : .queueAdvance
-        }
-        if let previousIndex, previousIndex != observedIndex {
-            return .queueAdvance
-        }
-        return .queueAdvance
-    }
-}
-
 struct StreamingPlaylistSelectionPlan: Sendable, Equatable {
     let selectedEntryID: String
     let selectedIndex: Int

@@ -24,6 +24,16 @@ struct StreamingBPMResolution: Equatable, Sendable {
     let didAttemptGetSongBPM: Bool
 }
 
+enum StreamingBPMPreloadDecision: Equatable, Sendable {
+    case apply(StreamingBPMResult)
+    case ignore
+
+    static func decide(delayedResult: StreamingBPMResult) -> Self {
+        guard let delayedResult = delayedResult.validated else { return .ignore }
+        return .apply(delayedResult)
+    }
+}
+
 struct PreviewAnalysisRetryPolicy: Equatable, Sendable {
     let maxAutomaticAttempts: Int
     private var failureCountsByIdentity: [String: Int] = [:]
@@ -227,7 +237,6 @@ final class AppleMusicStreamingController: ObservableObject {
     @Published private(set) var currentPlaylistEntries: [Playlist.Entry] = []
     @Published private(set) var currentPlaylistEntryID: String?
     @Published private(set) var currentPlaylistIndex: Int?
-    @Published private(set) var currentEntryOrigin: StreamingEntryOrigin = .explicitSelection
     private(set) var isPlaylistQueueContext = false
 
     private let player = ApplicationMusicPlayer.shared
@@ -244,7 +253,6 @@ final class AppleMusicStreamingController: ObservableObject {
     private var queuePolicyContext = StreamingQueuePolicyContext.empty
     private var selectionGeneration = 0
     private var currentPlaylist: Playlist?
-    private var requestedPlaylistIndex: Int?
     private let queueMutationGate = StreamingQueueMutationGate()
     private var isQueueMutationInFlight = false
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "AppleMusicStreaming")
@@ -363,8 +371,6 @@ final class AppleMusicStreamingController: ObservableObject {
         currentPlaylistEntries = []
         currentPlaylistEntryID = nil
         currentPlaylistIndex = nil
-        requestedPlaylistIndex = nil
-        currentEntryOrigin = .explicitSelection
     }
 
     func clearError() {
@@ -495,8 +501,6 @@ final class AppleMusicStreamingController: ObservableObject {
         currentPlaylistEntries = entries
         currentPlaylistEntryID = selectedEntry.id.rawValue
         currentPlaylistIndex = plan.selectedIndex
-        requestedPlaylistIndex = plan.selectedIndex
-        currentEntryOrigin = .explicitSelection
 
         let generation = beginExplicitSelection(
             context: .playlist(identity: queueIdentity(for: selectedEntry)),
@@ -639,7 +643,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    let bpmResult = StreamingBPMResult(
+                    let delayedResult = StreamingBPMResult(
                         bpm: result.bpm,
                         source: .metadata,
                         beatOffsetSeconds: nil,
@@ -648,6 +652,9 @@ final class AppleMusicStreamingController: ObservableObject {
                         beatSyncStatus: .bpmOnly,
                         beatSyncIssue: .missingBeatGrid
                     )
+                    guard case .apply(let bpmResult) = StreamingBPMPreloadDecision.decide(
+                        delayedResult: delayedResult
+                    ) else { return }
                     self.cacheBPMResult(
                         bpmResult,
                         songID: lookup.appleMusicID,
@@ -787,7 +794,7 @@ final class AppleMusicStreamingController: ObservableObject {
 
     @discardableResult
     func setManualBPM(_ bpm: Double) -> Bool {
-        guard bpm.isFinite, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else {
+        guard let bpm = BPMRange.validatedOriginalBPM(bpm) else {
             errorMessage = "원본 BPM은 30~300 사이 숫자로 입력하세요"
             return false
         }
@@ -974,18 +981,6 @@ final class AppleMusicStreamingController: ObservableObject {
             to: queueIndex
         )
         guard currentPlaylistEntries.indices.contains(observedIndex) else { return }
-
-        let previousIndex = currentPlaylistIndex
-        if let requestedPlaylistIndex {
-            currentEntryOrigin = StreamingEntryOrigin.resolved(
-                requestedIndex: requestedPlaylistIndex,
-                previousIndex: previousIndex,
-                observedIndex: observedIndex
-            )
-            self.requestedPlaylistIndex = nil
-        } else if previousIndex != observedIndex {
-            currentEntryOrigin = .queueAdvance
-        }
 
         currentPlaylistIndex = observedIndex
         currentPlaylistEntryID = currentPlaylistEntries[observedIndex].id.rawValue
