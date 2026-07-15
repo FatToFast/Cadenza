@@ -169,7 +169,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertTrue(audio.isCurrentTempoPlayable)
     }
 
-    func testConfirmedOneTwentyBPMRejectsUnsafePlaybackRate() {
+    func testConfirmedOneTwentyBPMAcceleratesToBaseCadence() {
         let audio = AudioManager()
         audio.targetBPM = 180
 
@@ -179,11 +179,11 @@ final class AudioManagerGenerationTests: XCTestCase {
             beatOffsetSeconds: nil
         )
 
-        XCTAssertFalse(audio.tempoPlan.isPlayable)
-        XCTAssertLessThan(audio.tempoPlan.requiredPlaybackRate, BPMRange.minimumQualityRate)
-        XCTAssertFalse(audio.isCurrentTempoPlayable)
-        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
-        XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+        XCTAssertEqual(audio.musicalTargetBPM, 180, accuracy: 0.0001)
+        XCTAssertEqual(audio.playbackRate, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(audio.metronomeBPM, 180, accuracy: 0.0001)
+        XCTAssertNil(audio.tempoRejectionMessage)
     }
 
     func testConfirmedEightyNineBPMAdjustsToBaseCadence() {
@@ -207,30 +207,13 @@ final class AudioManagerGenerationTests: XCTestCase {
         audio.targetBPM = 180
 
         XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
-        XCTAssertLessThan(audio.tempoPlan.requiredPlaybackRate, BPMRange.minimumQualityRate)
+        XCTAssertEqual(audio.tempoPlan.requiredPlaybackRate, 1.5, accuracy: 0.0001)
         XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
         XCTAssertNil(audio.tempoRejectionMessage)
     }
 
-    func testMetronomeOnlyModeCanStartWithoutPlayableTrackTempo() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.metronomeEnabled = true
-
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
-        )
-
-        XCTAssertFalse(audio.hasLoadedTrack)
-        XCTAssertTrue(audio.canRunMetronomeForCurrentBeatSync)
-        XCTAssertFalse(audio.isCurrentTempoPlayable)
-        XCTAssertTrue(audio.canStartPlayback)
-    }
-
-    func testConfirmedRejectedLocalTrackCannotStartPlayback() async {
+    func testConfirmedLocalTrackCanStartPlayback() async {
         let audio = AudioManager()
         audio.targetBPM = 180
 
@@ -238,17 +221,17 @@ final class AudioManagerGenerationTests: XCTestCase {
 
         XCTAssertEqual(audio.state, .ready)
         XCTAssertTrue(audio.hasLoadedTrack)
-        XCTAssertFalse(audio.isCurrentTempoPlayable)
-        XCTAssertFalse(audio.canStartPlayback)
-        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
+        XCTAssertTrue(audio.canStartPlayback)
+        XCTAssertNil(audio.errorMessage)
 
         audio.play()
 
-        XCTAssertEqual(audio.state, .ready)
+        XCTAssertEqual(audio.state, .playing)
     }
 
-    func testPlayingDirectLocalTrackPausesAndShowsErrorWhenManualBPMBecomesRejected() async {
-        let suiteName = "AudioManagerGenerationTests.manual-rejection.\(UUID().uuidString)"
+    func testPlayingDirectLocalTrackKeepsPlayingWhenManualBPMBecomesOneTwenty() async {
+        let suiteName = "AudioManagerGenerationTests.manual-acceleration.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let audio = AudioManager(
@@ -265,11 +248,12 @@ final class AudioManagerGenerationTests: XCTestCase {
         await Task.yield()
         await Task.yield()
 
-        XCTAssertEqual(audio.state, .paused)
-        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
+        XCTAssertEqual(audio.state, .playing)
+        XCTAssertEqual(audio.playbackRate, 1.5, accuracy: 0.0001)
+        XCTAssertNil(audio.errorMessage)
     }
 
-    func testPlayingDirectLocalTrackPausesAndShowsErrorWhenCadenceBecomesRejected() async {
+    func testPlayingDirectLocalTrackKeepsPlayingWhenCadenceRequiresAcceleration() async {
         let audio = AudioManager()
         audio.targetBPM = 140
         await audio.loadSampleTrack(.clickLoop)
@@ -282,8 +266,9 @@ final class AudioManagerGenerationTests: XCTestCase {
         await Task.yield()
         await Task.yield()
 
-        XCTAssertEqual(audio.state, .paused)
-        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
+        XCTAssertEqual(audio.state, .playing)
+        XCTAssertEqual(audio.playbackRate, 1.5, accuracy: 0.0001)
+        XCTAssertNil(audio.errorMessage)
     }
 
     func testUnconfirmedLocalTrackCannotStartPlayback() async {
@@ -306,7 +291,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.state, .ready)
     }
 
-    func testConfirmedRejectedPlaylistTrackMarksCurrentAndAdvances() {
+    func testConfirmedTempoNeverMarksOrAdvancesLocalPlaylist() {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
@@ -324,47 +309,10 @@ final class AudioManagerGenerationTests: XCTestCase {
             allowsAutomaticAdvance: true
         )
 
-        XCTAssertEqual(action, .advance(playlist.currentItem!))
-        XCTAssertEqual(playlist.currentItem?.title, "b")
-        XCTAssertEqual(
-            playlist.items.first(where: { $0.title == "a" })?.unplayableReason,
-            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
-        )
-    }
-
-    func testRejectedPlaylistPolicyWrapsOnceToRecoverEarlierCandidate() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
-        )
-        var playlist = LocalFilePlaylist(
-            items: [
-                QueueItem(
-                    id: "a", title: "a", artist: nil,
-                    source: .file(URL(fileURLWithPath: "/tmp/a.mp3"))
-                ),
-                QueueItem(
-                    id: "b", title: "b", artist: nil,
-                    source: .file(URL(fileURLWithPath: "/tmp/b.mp3"))
-                ),
-            ],
-            currentIndex: 1
-        )
-
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: true
-        )
-
-        XCTAssertEqual(action, .advance(playlist.currentItem!))
+        XCTAssertEqual(action, .keepCurrent)
         XCTAssertEqual(playlist.currentItem?.title, "a")
-        XCTAssertEqual(
-            playlist.items.first(where: { $0.title == "b" })?.unplayableReason,
-            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
-        )
+        XCTAssertNil(playlist.currentItem?.unplayableReason)
+        XCTAssertTrue(audio.isCurrentTempoPlayable)
     }
 
     func testUnconfirmedPlaylistTrackDoesNotMarkOrAdvance() {
@@ -383,105 +331,6 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(action, .keepCurrent)
         XCTAssertEqual(playlist.currentItem?.title, "a")
         XCTAssertNil(playlist.currentItem?.unplayableReason)
-    }
-
-    func testRejectedPlaylistWithNoPlayableItemReportsExhausted() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
-        )
-        var playlist = LocalFilePlaylist(items: [
-            QueueItem(
-                id: "a", title: "a", artist: nil,
-                source: .file(URL(fileURLWithPath: "/tmp/a.mp3"))
-            ),
-            QueueItem(
-                id: "b", title: "b", artist: nil,
-                source: .file(URL(fileURLWithPath: "/tmp/b.mp3")),
-                unplayableReason: .rateOutOfRange(required: 1.7)
-            ),
-        ])
-
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: true
-        )
-
-        XCTAssertEqual(action, .exhausted)
-        XCTAssertEqual(
-            playlist.currentItem?.unplayableReason,
-            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
-        )
-    }
-
-    func testRejectedDirectTrackNeverAdvancesQueue() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
-        )
-        var playlist = LocalFilePlaylist(fileURLs: [
-            URL(fileURLWithPath: "/tmp/a.mp3"),
-            URL(fileURLWithPath: "/tmp/b.mp3"),
-        ])
-
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: false
-        )
-
-        XCTAssertEqual(action, .rejectCurrent)
-        XCTAssertEqual(playlist.currentItem?.title, "a")
-        XCTAssertNil(playlist.currentItem?.unplayableReason)
-        XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
-    }
-
-    func testRejectedOneItemPlaylistReturnsDirectRejectionWithoutMarkingOrAdvancing() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
-        )
-        var playlist = LocalFilePlaylist(fileURLs: [
-            URL(fileURLWithPath: "/tmp/only.mp3"),
-        ])
-
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: true
-        )
-
-        XCTAssertEqual(action, .rejectCurrent)
-        XCTAssertEqual(playlist.currentItem?.title, "only")
-        XCTAssertNil(playlist.currentItem?.unplayableReason)
-    }
-
-    func testRejectedOneItemPlaylistLoadsWithoutAdvancingAndShowsDirectError() async throws {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        await audio.loadSampleTrack(.clickLoop)
-        let cachesDirectory = try FileManager.default.url(
-            for: .cachesDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        )
-        let sampleURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
-
-        await audio.loadPlaylist(fileURLs: [sampleURL], autoPlay: true)
-
-        XCTAssertEqual(audio.localPlaylist.count, 1)
-        XCTAssertEqual(audio.localPlaylist.currentItem?.source, .file(sampleURL))
-        XCTAssertNil(audio.localPlaylist.currentItem?.unplayableReason)
-        XCTAssertNotEqual(audio.state, .playing)
-        XCTAssertEqual(audio.errorMessage, "케이던스 범위에 맞지 않는 곡입니다")
     }
 
     func testStreamingQueuePolicyContextTransitionsBetweenSongAndPlaylist() {

@@ -8,8 +8,6 @@ enum BPMRange {
     static let targetMax: Double = 200
     static let targetDefault: Double = 180
     static let cadenceAllowance: Double = 10
-    static let maximumQualityRate: Double = 1.25
-    static var minimumQualityRate: Double { 1.0 / maximumQualityRate }
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
@@ -24,8 +22,6 @@ enum BPMRange {
 
     enum TempoRejectionReason: Equatable, Sendable {
         case invalidOriginalBPM
-        case slowingRequired
-        case rateAboveMaximum
     }
 
     struct TempoPlan: Equatable, Sendable {
@@ -49,10 +45,7 @@ enum BPMRange {
         guard originalBPM.isFinite, originalBPM > 0 else {
             return rejectedPlan(
                 base: base,
-                allowed: allowed,
-                musicalTarget: base,
-                requiredPlaybackRate: 0,
-                reason: .invalidOriginalBPM
+                allowed: allowed
             )
         }
 
@@ -69,72 +62,21 @@ enum BPMRange {
             )
         }
 
-        let adjustment = closestWindowAdjustment(
-            originalBPM: originalBPM,
-            allowedCadence: allowed
+        let musicalTarget = foldedMusicalTarget(
+            targetCadence: base,
+            originalBPM: originalBPM
         )
-        let musicalTarget = adjustment.musicalTarget
-        let requiredPlaybackRate = adjustment.playbackRate
-
-        guard requiredPlaybackRate >= minimumQualityRate else {
-            return rejectedPlan(
-                base: base,
-                allowed: allowed,
-                musicalTarget: musicalTarget,
-                effectiveCadence: adjustment.effectiveCadence,
-                requiredPlaybackRate: requiredPlaybackRate,
-                reason: .slowingRequired
-            )
-        }
-        guard requiredPlaybackRate <= maximumQualityRate else {
-            return rejectedPlan(
-                base: base,
-                allowed: allowed,
-                musicalTarget: musicalTarget,
-                effectiveCadence: adjustment.effectiveCadence,
-                requiredPlaybackRate: requiredPlaybackRate,
-                reason: .rateAboveMaximum
-            )
-        }
+        let requiredPlaybackRate = musicalTarget / originalBPM
 
         return TempoPlan(
             baseCadence: base,
             allowedCadence: allowed,
             musicalTarget: musicalTarget,
-            effectiveCadence: adjustment.effectiveCadence,
+            effectiveCadence: base,
             requiredPlaybackRate: requiredPlaybackRate,
             mode: .adjustedSpeed,
             rejectionReason: nil
         )
-    }
-
-    private struct WindowAdjustment {
-        let musicalTarget: Double
-        let effectiveCadence: Double
-        let playbackRate: Double
-    }
-
-    private static func closestWindowAdjustment(
-        originalBPM: Double,
-        allowedCadence: ClosedRange<Double>
-    ) -> WindowAdjustment {
-        [1.0, 2.0, 4.0]
-            .map { cadenceMultiplier in
-                let nativeCadence = originalBPM * cadenceMultiplier
-                let effectiveCadence = min(
-                    max(nativeCadence, allowedCadence.lowerBound),
-                    allowedCadence.upperBound
-                )
-                let playbackRate = effectiveCadence / nativeCadence
-                return WindowAdjustment(
-                    musicalTarget: effectiveCadence / cadenceMultiplier,
-                    effectiveCadence: effectiveCadence,
-                    playbackRate: playbackRate
-                )
-            }
-            .min { lhs, rhs in
-                abs(log2(lhs.playbackRate)) < abs(log2(rhs.playbackRate))
-            }!
     }
 
     /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 배속이 1.0 이상이면서 가장 1.0에
@@ -175,20 +117,16 @@ enum BPMRange {
 
     private static func rejectedPlan(
         base: Double,
-        allowed: ClosedRange<Double>,
-        musicalTarget: Double,
-        effectiveCadence: Double? = nil,
-        requiredPlaybackRate: Double,
-        reason: TempoRejectionReason
+        allowed: ClosedRange<Double>
     ) -> TempoPlan {
         TempoPlan(
             baseCadence: base,
             allowedCadence: allowed,
-            musicalTarget: musicalTarget,
-            effectiveCadence: effectiveCadence ?? base,
-            requiredPlaybackRate: requiredPlaybackRate,
+            musicalTarget: base,
+            effectiveCadence: base,
+            requiredPlaybackRate: 0,
             mode: .rejected,
-            rejectionReason: reason
+            rejectionReason: .invalidOriginalBPM
         )
     }
 }
