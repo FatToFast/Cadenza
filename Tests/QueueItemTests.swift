@@ -311,29 +311,23 @@ final class QueueItemTests: XCTestCase {
         )
     }
 
-    func testStreamingQueueStartVerifierAcceptsPlaylistOrResolvedSongIdentity() {
+    func testStreamingQueueStartVerifierRequiresExactPreparedQueueIndex() {
         XCTAssertTrue(
             StreamingQueueStartVerifier.matches(
-                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
-                actualPlayableID: "playlist-entry-4"
-            )
-        )
-        XCTAssertTrue(
-            StreamingQueueStartVerifier.matches(
-                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
-                actualPlayableID: "catalog-song-9"
+                expectedIndex: 4,
+                actualIndex: 4
             )
         )
         XCTAssertFalse(
             StreamingQueueStartVerifier.matches(
-                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
-                actualPlayableID: "queue-entry-8"
+                expectedIndex: 4,
+                actualIndex: 8
             )
         )
         XCTAssertFalse(
             StreamingQueueStartVerifier.matches(
-                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
-                actualPlayableID: nil
+                expectedIndex: 4,
+                actualIndex: nil
             )
         )
     }

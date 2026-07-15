@@ -326,11 +326,10 @@ struct StreamingPlaylistSelectionPlan: Sendable, Equatable {
 
 struct StreamingQueueStartVerifier: Sendable, Equatable {
     static func matches(
-        expectedPlayableIDs: [String],
-        actualPlayableID: String?
+        expectedIndex: Int,
+        actualIndex: Int?
     ) -> Bool {
-        guard let actualPlayableID else { return false }
-        return expectedPlayableIDs.contains(actualPlayableID)
+        expectedIndex == actualIndex
     }
 }
 
