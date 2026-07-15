@@ -527,7 +527,7 @@ struct PlayerView: View {
 
     private var cadenceFallback: some View {
         CadenceVisualization(
-            bpm: Int(nowPlaying.originalBPM.rounded()),
+            cadence: Int(audio.effectiveCadence.rounded()),
             isActive: audio.state == .playing || streaming.isPlaying
         )
     }

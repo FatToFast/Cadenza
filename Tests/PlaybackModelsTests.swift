@@ -420,6 +420,39 @@ final class PlaybackModelsTests: XCTestCase {
         )
     }
 
+    func testBeatGridCadenceInterpolatorSupportsFourfoldPulse() {
+        XCTAssertEqual(
+            BeatGridCadenceInterpolator.multiplier(
+                effectiveCadence: 184,
+                musicalTargetBPM: 46
+            ),
+            4
+        )
+
+        let subdivided = BeatGridCadenceInterpolator.subdivide(
+            beatTimesSeconds: [0, 4.0 / 3.0, 8.0 / 3.0],
+            multiplier: 4
+        )
+
+        XCTAssertEqual(subdivided.count, 9)
+        XCTAssertEqual(subdivided[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(subdivided[1], 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(subdivided[2], 2.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(subdivided[3], 1.0, accuracy: 0.0001)
+        XCTAssertEqual(subdivided[4], 4.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(subdivided[8], 8.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testCadenceVisualizationDescribesEffectiveCadenceInSPM() {
+        let visualization = CadenceVisualization(cadence: 184, isActive: true)
+
+        XCTAssertEqual(visualization.cadence, 184)
+        XCTAssertEqual(
+            CadenceVisualization.accessibilityDescription(for: 184),
+            "케이던스 184 SPM 시각화"
+        )
+    }
+
     func testBPMOctaveResolverPrefersHalfTimeWhenDoubleTimeCandidateIsLikely() {
         let resolved = BPMOctaveResolver.resolve(candidates: [
             BPMCandidate(bpm: 94, score: 0.42),

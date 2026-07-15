@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Spec: docs/superpowers/specs/2026-04-21-design-system-redesign-design.md §5.2
 struct CadenceVisualization: View {
-    let bpm: Int
+    let cadence: Int
     var isActive: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,7 +30,11 @@ struct CadenceVisualization: View {
                     .padding(.top, 12)
             }
         }
-        .accessibilityLabel("케이던스 \(bpm) BPM 시각화")
+        .accessibilityLabel(Self.accessibilityDescription(for: cadence))
+    }
+
+    static func accessibilityDescription(for cadence: Int) -> String {
+        "케이던스 \(cadence) SPM 시각화"
     }
 
     private func ringStack(in size: CGFloat) -> some View {
@@ -49,13 +53,13 @@ struct CadenceVisualization: View {
 
     @ViewBuilder
     private func centerDot(diameter: CGFloat) -> some View {
-        if reduceMotion || !isActive || bpm <= 0 {
+        if reduceMotion || !isActive || cadence <= 0 {
             Circle()
                 .fill(Color.cadenzaAccent)
                 .frame(width: diameter, height: diameter)
                 .shadow(color: Color.cadenzaAccent.opacity(0.4), radius: 6)
         } else {
-            let beatInterval = 60.0 / Double(bpm)
+            let beatInterval = 60.0 / Double(cadence)
             TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
                 let elapsed = context.date.timeIntervalSinceReferenceDate
                 let phase = elapsed.truncatingRemainder(dividingBy: beatInterval) / beatInterval

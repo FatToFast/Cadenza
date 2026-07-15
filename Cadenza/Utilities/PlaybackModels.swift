@@ -267,6 +267,55 @@ enum BeatGridSyncPlanner {
     }
 }
 
+enum BeatGridCadenceInterpolator {
+    private static let supportedMultipliers = [1, 2, 4]
+
+    static func multiplier(
+        effectiveCadence: Double,
+        musicalTargetBPM: Double
+    ) -> Int {
+        guard effectiveCadence.isFinite,
+              musicalTargetBPM.isFinite,
+              effectiveCadence > 0,
+              musicalTargetBPM > 0 else { return 1 }
+
+        let ratio = effectiveCadence / musicalTargetBPM
+        return supportedMultipliers.min { lhs, rhs in
+            abs(Double(lhs) - ratio) < abs(Double(rhs) - ratio)
+        } ?? 1
+    }
+
+    static func subdivide(
+        beatTimesSeconds: [TimeInterval],
+        multiplier: Int
+    ) -> [TimeInterval] {
+        guard multiplier > 1, beatTimesSeconds.count >= 2 else {
+            return beatTimesSeconds
+        }
+
+        var result: [TimeInterval] = []
+        result.reserveCapacity((beatTimesSeconds.count - 1) * multiplier + 1)
+
+        for index in beatTimesSeconds.indices.dropLast() {
+            let start = beatTimesSeconds[index]
+            let end = beatTimesSeconds[index + 1]
+            let interval = end - start
+            guard start.isFinite,
+                  end.isFinite,
+                  interval > 0 else { return beatTimesSeconds }
+
+            result.append(start)
+            for subdivision in 1..<multiplier {
+                result.append(start + interval * Double(subdivision) / Double(multiplier))
+            }
+        }
+        if let last = beatTimesSeconds.last {
+            result.append(last)
+        }
+        return result
+    }
+}
+
 enum BeatOffsetAdjustment {
     static func effectiveOffset(
         detectedOffset: TimeInterval,

@@ -598,7 +598,7 @@ final class AudioManager: ObservableObject {
         playlist.markCurrentUnplayable(
             .rateOutOfRange(required: tempoPlan.requiredPlaybackRate)
         )
-        guard let next = playlist.moveToNextPlayable() else { return .exhausted }
+        guard let next = playlist.moveToNextPlayableWrappingAtEnd() else { return .exhausted }
         return .advance(next)
     }
 
@@ -1617,25 +1617,14 @@ final class AudioManager: ObservableObject {
     }
 
     private var metronomeBeatTimesSeconds: [TimeInterval] {
-        guard metronomeBPM > musicalTargetBPM * 1.5 else { return sourceBeatTimesSeconds }
-        return doubledBeatTimes(sourceBeatTimesSeconds)
-    }
-
-    private func doubledBeatTimes(_ beatTimes: [TimeInterval]) -> [TimeInterval] {
-        guard beatTimes.count >= 2 else { return beatTimes }
-
-        var doubled: [TimeInterval] = []
-        doubled.reserveCapacity(beatTimes.count * 2 - 1)
-        for index in beatTimes.indices {
-            let beatTime = beatTimes[index]
-            doubled.append(beatTime)
-
-            let nextIndex = beatTimes.index(after: index)
-            if beatTimes.indices.contains(nextIndex) {
-                doubled.append((beatTime + beatTimes[nextIndex]) / 2)
-            }
-        }
-        return doubled
+        let multiplier = BeatGridCadenceInterpolator.multiplier(
+            effectiveCadence: metronomeBPM,
+            musicalTargetBPM: musicalTargetBPM
+        )
+        return BeatGridCadenceInterpolator.subdivide(
+            beatTimesSeconds: sourceBeatTimesSeconds,
+            multiplier: multiplier
+        )
     }
 
     private func startProgressUpdates() {

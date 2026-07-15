@@ -332,6 +332,41 @@ final class AudioManagerGenerationTests: XCTestCase {
         )
     }
 
+    func testRejectedPlaylistPolicyWrapsOnceToRecoverEarlierCandidate() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+        audio.setStreamingBeatAlignment(
+            bpm: 96,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+        var playlist = LocalFilePlaylist(
+            items: [
+                QueueItem(
+                    id: "a", title: "a", artist: nil,
+                    source: .file(URL(fileURLWithPath: "/tmp/a.mp3"))
+                ),
+                QueueItem(
+                    id: "b", title: "b", artist: nil,
+                    source: .file(URL(fileURLWithPath: "/tmp/b.mp3"))
+                ),
+            ],
+            currentIndex: 1
+        )
+
+        let action = audio.evaluateCurrentLocalTempoPolicy(
+            playlist: &playlist,
+            allowsAutomaticAdvance: true
+        )
+
+        XCTAssertEqual(action, .advance(playlist.currentItem!))
+        XCTAssertEqual(playlist.currentItem?.title, "a")
+        XCTAssertEqual(
+            playlist.items.first(where: { $0.title == "b" })?.unplayableReason,
+            .rateOutOfRange(required: audio.tempoPlan.requiredPlaybackRate)
+        )
+    }
+
     func testUnconfirmedPlaylistTrackDoesNotMarkOrAdvance() {
         let audio = AudioManager()
         audio.targetBPM = 180
