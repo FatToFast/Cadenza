@@ -14,7 +14,6 @@ struct QueueItem: Identifiable, Sendable, Equatable {
 
     enum UnplayableReason: Sendable, Equatable {
         case cloudOnly, decodingFailed, subscriptionLapsed
-        case rateOutOfRange(required: Double)
     }
 
     var analysisCacheIdentity: String {
@@ -122,34 +121,6 @@ struct LocalFilePlaylist: Sendable, Equatable {
             candidateIndex += 1
         }
         return nil
-    }
-
-    /// Automatic tempo-policy scans may revisit the start of the queue once after
-    /// the cadence changes. Rejected entries stay marked, so this remains bounded
-    /// and cannot loop back onto the current rejected track.
-    mutating func moveToNextPlayableWrappingAtEnd() -> QueueItem? {
-        guard let currentIndex, items.count > 1 else { return nil }
-
-        for offset in 1..<items.count {
-            let candidateIndex = (currentIndex + offset) % items.count
-            if items[candidateIndex].unplayableReason == nil {
-                self.currentIndex = candidateIndex
-                return items[candidateIndex]
-            }
-        }
-        return nil
-    }
-
-    mutating func clearTempoUnplayableReasons() {
-        let tempoRejectedIDs = Set(items.compactMap { item -> String? in
-            guard case .rateOutOfRange = item.unplayableReason else { return nil }
-            return item.id
-        })
-        guard !tempoRejectedIDs.isEmpty else { return }
-
-        for id in tempoRejectedIDs {
-            updateItem(id: id) { $0.unplayableReason = nil }
-        }
     }
 
     mutating func moveToPrevious() -> QueueItem? {

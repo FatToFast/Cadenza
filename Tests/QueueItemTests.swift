@@ -128,7 +128,7 @@ final class QueueItemTests: XCTestCase {
         XCTAssertEqual(playlist.currentIndex, 1)
     }
 
-    func testMarkCurrentTempoUnplayableUpdatesShuffledAndOriginalCopies() throws {
+    func testMarkCurrentUnplayableUpdatesShuffledAndOriginalCopies() throws {
         var playlist = LocalFilePlaylist(fileURLs: [
             URL(fileURLWithPath: "/tmp/a.mp3"),
             URL(fileURLWithPath: "/tmp/b.mp3"),
@@ -138,37 +138,37 @@ final class QueueItemTests: XCTestCase {
         var generator = FixedRandomNumberGenerator(values: [1, 0])
         _ = playlist.toggleShuffle(using: &generator)
 
-        playlist.markCurrentUnplayable(.rateOutOfRange(required: 1.8))
+        playlist.markCurrentUnplayable(.decodingFailed)
 
         let currentID = try XCTUnwrap(playlist.currentItem?.id)
         XCTAssertEqual(
             playlist.items.first(where: { $0.id == currentID })?.unplayableReason,
-            .rateOutOfRange(required: 1.8)
+            .decodingFailed
         )
         XCTAssertEqual(
             playlist.originalItems.first(where: { $0.id == currentID })?.unplayableReason,
-            .rateOutOfRange(required: 1.8)
+            .decodingFailed
         )
 
         _ = playlist.toggleShuffle(using: &generator)
         XCTAssertEqual(
             playlist.items.first(where: { $0.id == currentID })?.unplayableReason,
-            .rateOutOfRange(required: 1.8)
+            .decodingFailed
         )
     }
 
-    func testPlaylistSkipsItemsMarkedTempoUnplayableWithoutWrapping() {
+    func testPlaylistSkipsItemsMarkedUnplayableWithoutWrapping() {
         var playlist = LocalFilePlaylist(fileURLs: [
             URL(fileURLWithPath: "/tmp/a.mp3"),
             URL(fileURLWithPath: "/tmp/b.mp3"),
             URL(fileURLWithPath: "/tmp/c.mp3"),
         ])
 
-        playlist.markCurrentUnplayable(.rateOutOfRange(required: 1.8))
+        playlist.markCurrentUnplayable(.decodingFailed)
         XCTAssertEqual(playlist.moveToNextPlayable()?.title, "b")
-        playlist.markCurrentUnplayable(.rateOutOfRange(required: 1.7))
+        playlist.markCurrentUnplayable(.cloudOnly)
         XCTAssertEqual(playlist.moveToNextPlayable()?.title, "c")
-        playlist.markCurrentUnplayable(.rateOutOfRange(required: 1.6))
+        playlist.markCurrentUnplayable(.subscriptionLapsed)
         XCTAssertNil(playlist.moveToNextPlayable())
         XCTAssertEqual(playlist.currentItem?.title, "c")
     }
@@ -181,7 +181,7 @@ final class QueueItemTests: XCTestCase {
             QueueItem(id: "a", title: "a", artist: nil, source: .file(urlA)),
             QueueItem(
                 id: "b", title: "b", artist: nil, source: .file(urlB),
-                unplayableReason: .rateOutOfRange(required: 1.5)
+                unplayableReason: .cloudOnly
             ),
             QueueItem(
                 id: "c", title: "c", artist: nil, source: .file(urlC),
@@ -191,26 +191,6 @@ final class QueueItemTests: XCTestCase {
 
         XCTAssertNil(playlist.moveToNextPlayable())
         XCTAssertEqual(playlist.currentItem?.title, "a")
-    }
-
-    func testClearingTempoRejectionsPreservesUnrelatedFailures() {
-        let urlA = URL(fileURLWithPath: "/tmp/a.mp3")
-        let urlB = URL(fileURLWithPath: "/tmp/b.mp3")
-        var playlist = LocalFilePlaylist(items: [
-            QueueItem(
-                id: "a", title: "a", artist: nil, source: .file(urlA),
-                unplayableReason: .rateOutOfRange(required: 1.8)
-            ),
-            QueueItem(
-                id: "b", title: "b", artist: nil, source: .file(urlB),
-                unplayableReason: .decodingFailed
-            ),
-        ])
-
-        playlist.clearTempoUnplayableReasons()
-
-        XCTAssertNil(playlist.items[0].unplayableReason)
-        XCTAssertEqual(playlist.items[1].unplayableReason, .decodingFailed)
     }
 
     func testTempoSkipGuardRejectsDuplicateIdentityUntilReset() {

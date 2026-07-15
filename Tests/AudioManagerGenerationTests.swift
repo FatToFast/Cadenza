@@ -183,7 +183,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.musicalTargetBPM, 180, accuracy: 0.0001)
         XCTAssertEqual(audio.playbackRate, 1.5, accuracy: 0.0001)
         XCTAssertEqual(audio.metronomeBPM, 180, accuracy: 0.0001)
-        XCTAssertNil(audio.tempoRejectionMessage)
+        XCTAssertNil(audio.errorMessage)
     }
 
     func testConfirmedEightyNineBPMAdjustsToBaseCadence() {
@@ -210,7 +210,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.tempoPlan.requiredPlaybackRate, 1.5, accuracy: 0.0001)
         XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
-        XCTAssertNil(audio.tempoRejectionMessage)
+        XCTAssertNil(audio.errorMessage)
     }
 
     func testConfirmedLocalTrackCanStartPlayback() async {
@@ -291,46 +291,40 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.state, .ready)
     }
 
-    func testConfirmedTempoNeverMarksOrAdvancesLocalPlaylist() {
-        let audio = AudioManager()
-        audio.targetBPM = 180
-        audio.setStreamingBeatAlignment(
-            bpm: 120,
-            source: .metadata,
-            beatOffsetSeconds: nil
+    func testConfirmedOneTwentyBPMStaysOnCurrentPlayingPlaylistTrack() async throws {
+        let preparer = AudioManager()
+        await preparer.loadSampleTrack(.clickLoop)
+        let cachesDirectory = try FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
         )
-        var playlist = LocalFilePlaylist(fileURLs: [
-            URL(fileURLWithPath: "/tmp/a.mp3"),
-            URL(fileURLWithPath: "/tmp/b.mp3"),
+        let sampleURL = cachesDirectory.appendingPathComponent(SampleTrackPreset.clickLoop.filename)
+        let suiteName = "AudioManagerGenerationTests.playlist-acceleration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let audio = AudioManager(
+            bpmOverrideStore: TrackBPMOverrideStore(defaults: defaults)
+        )
+        audio.targetBPM = 175
+        await audio.loadPlaylist(fileURLs: [
+            sampleURL,
+            URL(fileURLWithPath: "/tmp/z-next.mp3"),
         ])
+        audio.setOriginalBPM(120)
+        audio.play()
+        let currentID = try XCTUnwrap(audio.localPlaylist.currentItem?.id)
 
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: true
-        )
-
-        XCTAssertEqual(action, .keepCurrent)
-        XCTAssertEqual(playlist.currentItem?.title, "a")
-        XCTAssertNil(playlist.currentItem?.unplayableReason)
-        XCTAssertTrue(audio.isCurrentTempoPlayable)
-    }
-
-    func testUnconfirmedPlaylistTrackDoesNotMarkOrAdvance() {
-        let audio = AudioManager()
         audio.targetBPM = 180
-        var playlist = LocalFilePlaylist(fileURLs: [
-            URL(fileURLWithPath: "/tmp/a.mp3"),
-            URL(fileURLWithPath: "/tmp/b.mp3"),
-        ])
+        await Task.yield()
+        await Task.yield()
 
-        let action = audio.evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: true
-        )
-
-        XCTAssertEqual(action, .keepCurrent)
-        XCTAssertEqual(playlist.currentItem?.title, "a")
-        XCTAssertNil(playlist.currentItem?.unplayableReason)
+        XCTAssertEqual(audio.state, .playing)
+        XCTAssertEqual(audio.playbackRate, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(audio.localPlaylist.currentItem?.id, currentID)
+        XCTAssertNil(audio.localPlaylist.currentItem?.unplayableReason)
+        XCTAssertNil(audio.errorMessage)
     }
 
     func testStreamingQueuePolicyContextTransitionsBetweenSongAndPlaylist() {

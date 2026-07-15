@@ -269,6 +269,17 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(plan.mode, .originalSpeed)
     }
 
+    func testTempoPlanUsesNativeHalfTimeCadenceInsideWindow() {
+        let plan = BPMRange.tempoPlan(targetCadence: 140, originalBPM: 280)
+
+        XCTAssertEqual(plan.allowedCadence, 140...150)
+        XCTAssertEqual(plan.musicalTarget, 280, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 140, accuracy: 0.0001)
+        XCTAssertEqual(plan.requiredPlaybackRate, 1.0, accuracy: 0.0001)
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(plan.mode, .originalSpeed)
+    }
+
     func testTempoPlanNeverDriftsBelowBaseCadence() {
         let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 89)
 
@@ -316,24 +327,24 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(plan.playbackRate, 1.5, accuracy: 0.0001)
     }
 
-    func testTempoPlanMakesEverySupportedOriginalBPMPlayableWithoutSlowing() {
-        for originalBPM in stride(from: 30.0, through: 300.0, by: 1.0) {
-            let plan = BPMRange.tempoPlan(
-                targetCadence: 180,
-                originalBPM: originalBPM
-            )
+    func testTempoPlanMakesEverySupportedCadenceAndOriginalBPMPlayableWithoutSlowing() {
+        for targetCadence in stride(from: 140.0, through: 200.0, by: 1.0) {
+            for originalBPM in stride(from: 30.0, through: 300.0, by: 1.0) {
+                let plan = BPMRange.tempoPlan(
+                    targetCadence: targetCadence,
+                    originalBPM: originalBPM
+                )
+                let context = "Cadence: \(targetCadence), BPM: \(originalBPM)"
 
-            XCTAssertTrue(plan.isPlayable, "BPM: \(originalBPM)")
-            XCTAssertGreaterThanOrEqual(
-                plan.requiredPlaybackRate,
-                1.0,
-                "BPM: \(originalBPM)"
-            )
-            XCTAssertLessThanOrEqual(
-                plan.requiredPlaybackRate,
-                Double(BPMRange.rateMax),
-                "BPM: \(originalBPM)"
-            )
+                XCTAssertTrue(plan.isPlayable, context)
+                XCTAssertTrue(plan.requiredPlaybackRate.isFinite, context)
+                XCTAssertGreaterThanOrEqual(plan.requiredPlaybackRate, 1.0, context)
+                XCTAssertLessThanOrEqual(
+                    plan.requiredPlaybackRate,
+                    Double(BPMRange.rateMax),
+                    context
+                )
+            }
         }
     }
 
@@ -381,6 +392,21 @@ final class PlaybackModelsTests: XCTestCase {
             XCTAssertFalse(plan.isPlayable)
             XCTAssertEqual(plan.mode, .rejected)
             XCTAssertEqual(plan.rejectionReason, .invalidOriginalBPM)
+            XCTAssertEqual(plan.playbackRate, 1.0, accuracy: 0.0001)
+        }
+    }
+
+    func testTempoPlanRejectsFiniteOriginalBPMOutsideSupportedRange() {
+        for originalBPM in [1.0, 29.0, 301.0, 1_000.0] {
+            let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: originalBPM)
+
+            XCTAssertFalse(plan.isPlayable, "BPM: \(originalBPM)")
+            XCTAssertEqual(plan.mode, .rejected, "BPM: \(originalBPM)")
+            XCTAssertEqual(
+                plan.rejectionReason,
+                .invalidOriginalBPM,
+                "BPM: \(originalBPM)"
+            )
             XCTAssertEqual(plan.playbackRate, 1.0, accuracy: 0.0001)
         }
     }
@@ -685,7 +711,7 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.badgeText, "박자 불안정")
     }
 
-    func testRunningCadenceFitMarksMaximumAllowedSpeedAsAwkward() {
+    func testRunningCadenceFitMarksOnePointTwoFiveAccelerationAsAwkward() {
         let fit = RunningCadenceFit.evaluate(originalBPM: 72)
 
         XCTAssertEqual(fit.playbackRate, 1.25, accuracy: 0.0001)

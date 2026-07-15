@@ -62,13 +62,6 @@ enum SampleTrackPreset: String, CaseIterable, Identifiable {
     }
 }
 
-enum LocalTempoPolicyAction: Equatable {
-    case keepCurrent
-    case rejectCurrent
-    case advance(QueueItem)
-    case exhausted
-}
-
 // MARK: - AudioManager
 
 /// AVAudioEngine 래핑. 앱의 오디오 재생 전체를 관리한다.
@@ -92,17 +85,8 @@ final class AudioManager: ObservableObject {
                 return
             }
             defaults.set(targetBPM, forKey: Self.targetCadenceDefaultsKey)
-            tempoPolicyRevision += 1
-            var playlist = localPlaylist
-            playlist.clearTempoUnplayableReasons()
-            localPlaylist = playlist
-            clearTempoPolicyError()
             updateRate()
             restartMetronomeIfNeeded()
-            let revision = tempoPolicyRevision
-            Task { [weak self] in
-                await self?.reevaluateLocalPlaylistTempoPolicy(revision: revision)
-            }
         }
     }
     @Published private(set) var originalBPM: Double = BPMRange.originalDefault
@@ -160,11 +144,6 @@ final class AudioManager: ObservableObject {
 
     var isCurrentTempoPlayable: Bool {
         originalBPMSource != .assumedDefault && tempoPlan.isPlayable
-    }
-
-    var tempoRejectionMessage: String? {
-        guard originalBPMSource != .assumedDefault, !tempoPlan.isPlayable else { return nil }
-        return "케이던스 범위에 맞지 않는 곡입니다"
     }
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
@@ -255,7 +234,6 @@ final class AudioManager: ObservableObject {
     private var pendingPresetBPMHint: Double?
     private var cachedMetronomeDelay: TimeInterval?
     private var trackGeneration: Int = 0
-    private var tempoPolicyRevision: Int = 0
     let trackEndedSubject = PassthroughSubject<Void, Never>()
     @Published var playbackEndBehavior: PlaybackEndBehavior = .loop
     @Published private(set) var localPlaylist = LocalFilePlaylist()
@@ -432,14 +410,10 @@ final class AudioManager: ObservableObject {
     }
 
     private func loadDirectFile(url: URL) async -> Int? {
-        guard let committedGeneration = await loadFileWithoutDirectTempoEnforcement(url: url) else {
-            return nil
-        }
-        enforceDirectLocalTempoPolicy()
-        return committedGeneration
+        await loadFileForPlayback(url: url)
     }
 
-    private func loadFileWithoutDirectTempoEnforcement(
+    private func loadFileForPlayback(
         url: URL,
         expectedQueueItemID: String? = nil
     ) async -> Int? {
@@ -587,147 +561,19 @@ final class AudioManager: ObservableObject {
         }
     }
 
-    func evaluateCurrentLocalTempoPolicy(
-        playlist: inout LocalFilePlaylist,
-        allowsAutomaticAdvance: Bool
-    ) -> LocalTempoPolicyAction {
-        guard originalBPMSource != .assumedDefault else { return .keepCurrent }
-        guard !tempoPlan.isPlayable else { return .keepCurrent }
-        guard allowsAutomaticAdvance, playlist.count > 1 else { return .rejectCurrent }
-
-        playlist.markCurrentUnplayable(
-            .rateOutOfRange(required: tempoPlan.requiredPlaybackRate)
-        )
-        guard let next = playlist.moveToNextPlayableWrappingAtEnd() else { return .exhausted }
-        return .advance(next)
-    }
-
     private func loadPlaylistTrack(
-        item initialItem: QueueItem,
-        url initialURL: URL,
+        item: QueueItem,
+        url: URL,
         autoPlay: Bool
     ) async {
-        var item = initialItem
-        var url = initialURL
-        var attemptsRemaining = max(localPlaylist.count, 1)
+        let committedGeneration = await loadFileForPlayback(
+            url: url,
+            expectedQueueItemID: item.id
+        )
 
-        while attemptsRemaining > 0 {
-            attemptsRemaining -= 1
-            let committedGeneration = await loadFileWithoutDirectTempoEnforcement(
-                url: url,
-                expectedQueueItemID: item.id
-            )
-
-            guard localPlaylist.currentItem?.id == item.id else { return }
-            guard committedGeneration != nil, state == .ready else { return }
-
-            var playlist = localPlaylist
-            switch evaluateCurrentLocalTempoPolicy(
-                playlist: &playlist,
-                allowsAutomaticAdvance: true
-            ) {
-            case .keepCurrent:
-                localPlaylist = playlist
-                clearTempoPolicyError()
-                if autoPlay { play() }
-                return
-            case .rejectCurrent:
-                localPlaylist = playlist
-                enforceDirectLocalTempoPolicy()
-                return
-            case .advance(let next):
-                localPlaylist = playlist
-                syncPlaybackEndBehavior()
-                guard case .file(let nextURL) = next.source else {
-                    finishLocalTempoSkipCycle()
-                    return
-                }
-                item = next
-                url = nextURL
-            case .exhausted:
-                localPlaylist = playlist
-                finishLocalTempoSkipCycle()
-                return
-            }
-        }
-
-        finishLocalTempoSkipCycle()
-    }
-
-    private func reevaluateLocalPlaylistTempoPolicy(revision: Int) async {
-        guard revision == tempoPolicyRevision else { return }
-        guard hasLoadedTrack else { return }
-
-        let shouldAutoPlay = state == .playing
-        var playlist = localPlaylist
-        switch evaluateCurrentLocalTempoPolicy(
-            playlist: &playlist,
-            allowsAutomaticAdvance: playlist.count > 1
-        ) {
-        case .keepCurrent:
-            localPlaylist = playlist
-            clearTempoPolicyError()
-        case .rejectCurrent:
-            localPlaylist = playlist
-            enforceDirectLocalTempoPolicy()
-        case .advance(let next):
-            localPlaylist = playlist
-            syncPlaybackEndBehavior()
-            guard case .file(let url) = next.source else {
-                finishLocalTempoSkipCycle()
-                return
-            }
-            await loadPlaylistTrack(
-                item: next,
-                url: url,
-                autoPlay: shouldAutoPlay
-            )
-        case .exhausted:
-            localPlaylist = playlist
-            finishLocalTempoSkipCycle()
-        }
-    }
-
-    private func enforceDirectLocalTempoPolicy() {
-        guard hasLoadedTrack, state != .loading, state != .error else { return }
-        guard originalBPMSource != .assumedDefault else {
-            clearTempoPolicyError()
-            return
-        }
-        guard !tempoPlan.isPlayable else {
-            clearTempoPolicyError()
-            return
-        }
-
-        if state == .playing {
-            pause()
-        } else {
-            stopMetronome()
-        }
-        errorMessage = "케이던스 범위에 맞지 않는 곡입니다"
-    }
-
-    private func finishLocalTempoSkipCycle() {
-        playerNode.stop()
-        hasScheduledPlayback = false
-        isScheduling = false
-        scheduledLoopStartFrame = 0
-        currentScheduledStartFrame = 0
-        stopProgressUpdates()
-        stopMetronome()
-        if engine.isRunning {
-            engine.stop()
-        }
-        if audioFile != nil {
-            state = .ready
-        }
-        errorMessage = "케이던스 범위에 맞는 곡이 없습니다"
-    }
-
-    private func clearTempoPolicyError() {
-        guard errorMessage == "케이던스 범위에 맞는 곡이 없습니다"
-                || errorMessage == "케이던스 범위에 맞지 않는 곡입니다" else { return }
-        errorMessage = nil
+        guard localPlaylist.currentItem?.id == item.id else { return }
+        guard committedGeneration != nil, state == .ready else { return }
+        if autoPlay { play() }
     }
 
     private func syncPlaybackEndBehavior() {
@@ -764,7 +610,6 @@ final class AudioManager: ObservableObject {
                 originalBPMSource = .metadata
                 applyTempoPolicy()
             }
-            enforceDirectLocalTempoPolicy()
         }
     }
 
@@ -1043,7 +888,6 @@ final class AudioManager: ObservableObject {
                     }
                     applyTempoPolicy()
                 }
-                enforceDirectLocalTempoPolicy()
             }
         } catch {
             state = .error
@@ -1240,10 +1084,6 @@ final class AudioManager: ObservableObject {
             bpmOverrideStore.store(bpm: bpm, forIdentity: key)
         }
         applyTempoPolicy()
-        let revision = tempoPolicyRevision
-        Task { [weak self] in
-            await self?.reevaluateLocalPlaylistTempoPolicy(revision: revision)
-        }
     }
 
     func setStreamingOriginalBPM(_ bpm: Double?, source: OriginalBPMSource = .metadata) {

@@ -42,14 +42,15 @@ enum BPMRange {
         let base = min(max(normalizedTarget, targetMin), targetMax)
         let allowed = base...min(base + cadenceAllowance, targetMax)
 
-        guard originalBPM.isFinite, originalBPM > 0 else {
+        guard originalBPM.isFinite,
+              (originalMin...originalMax).contains(originalBPM) else {
             return rejectedPlan(
                 base: base,
                 allowed: allowed
             )
         }
 
-        let originalSpeedCadences = [1.0, 2.0, 4.0].map { originalBPM * $0 }
+        let originalSpeedCadences = [0.5, 1.0, 2.0, 4.0].map { originalBPM * $0 }
         if let effectiveCadence = originalSpeedCadences.first(where: allowed.contains) {
             return TempoPlan(
                 baseCadence: base,
@@ -79,36 +80,21 @@ enum BPMRange {
         )
     }
 
-    /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 배속이 1.0 이상이면서 가장 1.0에
-    /// 가까운(가장 작은) 음악적 목표 BPM을 반환. 원곡보다 느린 재생은 러닝에 부적합
-    /// 하므로 배속 < 1.0 후보는 상향 후보가 하나도 없을 때만 폴백으로 허용한다.
+    /// targetCadence × 2^k 후보 중 원곡 BPM 이상인 가장 작은 음악 목표를 반환한다.
+    /// `tempoPlan`의 지원 범위에서는 항상 상향 후보가 존재한다. 더 넓은 값으로 직접
+    /// 호출되더라도 원곡 BPM으로 폴백하므로 이 함수는 감속 목표를 반환하지 않는다.
     ///
     /// 러닝 케이던스는 전역·스티키 값이고, 곡마다 원곡 템포가 다르므로 배속을
     /// 옥타브 폴딩으로 재계산한다. 예) 원곡 85 + 케이던스 170 → 목표 85 (배속 1.0,
-    /// 한 박에 두 걸음). originalBPM <= 0이면 폴딩 근거가 없어 targetCadence를 그대로 반환.
+    /// 한 박에 두 걸음). 유효하지 않은 원곡 BPM이면 폴딩 근거가 없어 targetCadence를 반환한다.
     static func foldedMusicalTarget(targetCadence: Double, originalBPM: Double) -> Double {
-        guard originalBPM > 0 else { return targetCadence }
+        guard originalBPM.isFinite, originalBPM > 0 else { return targetCadence }
         let multipliers: [Double] = [0.25, 0.5, 1.0, 2.0, 4.0]
 
-        var bestUp: Double?
-        var bestUpRate = Double.infinity
-        var nearest = targetCadence
-        var nearestDistance = Double.infinity
-        for multiplier in multipliers {
-            let candidate = targetCadence * multiplier
-            let rate = candidate / originalBPM
-            guard rate > 0 else { continue }
-            if rate >= 1.0, rate < bestUpRate {
-                bestUpRate = rate
-                bestUp = candidate
-            }
-            let distance = abs(log2(rate))
-            if distance < nearestDistance {
-                nearestDistance = distance
-                nearest = candidate
-            }
-        }
-        return bestUp ?? nearest
+        return multipliers
+            .map { targetCadence * $0 }
+            .filter { $0 >= originalBPM }
+            .min() ?? originalBPM
     }
 
     static func metronomeCadence(forTargetBPM targetBPM: Double) -> Double {
