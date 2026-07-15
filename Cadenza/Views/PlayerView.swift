@@ -14,6 +14,8 @@ struct PlayerView: View {
     @State private var showAppleMusicPicker = false
     @State private var showAppleMusicStreamingSearch = false
     @State private var showAppleMusicStreamingPlaylists = false
+    @State private var showAppleMusicCurrentPlaylist = false
+    @State private var openAppleMusicPlaylistPickerAfterCurrentSheet = false
     @State private var showLocalQueueSheet = false
     @State private var isImportingAppleMusic = false
     @State private var originalBPMText = "\(Int(BPMRange.originalDefault))"
@@ -145,6 +147,21 @@ struct PlayerView: View {
                 playAppleMusicPlaylist(playlist, entry: entry, entries: entries)
             }
         }
+        .sheet(
+            isPresented: $showAppleMusicCurrentPlaylist,
+            onDismiss: openFullAppleMusicPlaylistPickerIfRequested
+        ) {
+            AppleMusicCurrentPlaylistSheet(
+                playlistName: streaming.currentPlaylistName ?? "현재 플레이리스트",
+                entries: streaming.currentPlaylistEntries,
+                currentEntryID: streaming.currentPlaylistEntryID,
+                bpmValue: streaming.cachedBPMValue(for:),
+                onSelect: playCurrentAppleMusicPlaylistEntry,
+                onChooseAnotherPlaylist: {
+                    openAppleMusicPlaylistPickerAfterCurrentSheet = true
+                }
+            )
+        }
         .sheet(isPresented: $showLocalQueueSheet) {
             LocalQueueSheet()
                 .environmentObject(audio)
@@ -245,6 +262,31 @@ struct PlayerView: View {
                     .padding(.vertical, 4)
                     .background(Color.cadenzaWarning.opacity(0.15))
                     .clipShape(Capsule())
+
+                if streaming.hasCurrentPlaylist {
+                    Button {
+                        showAppleMusicCurrentPlaylist = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet")
+                            Text("현재 플레이리스트")
+                            if let index = streaming.currentPlaylistIndex {
+                                Text("\(index + 1) / \(streaming.currentPlaylistEntries.count)")
+                                    .foregroundColor(.cadenzaTextTertiary)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                        }
+                        .font(.cadenzaCaption)
+                        .foregroundColor(.cadenzaAccent)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(Color.cadenzaBackgroundSecondary)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("이미 불러온 플레이리스트에서 다른 곡을 선택합니다")
+                }
             }
             .padding(.horizontal, 20)
         } else if let title = nowPlaying.title {
@@ -1014,6 +1056,26 @@ struct PlayerView: View {
             )
             applyStreamingTempoAndAlignment()
         }
+    }
+
+    private func playCurrentAppleMusicPlaylistEntry(_ entry: Playlist.Entry) {
+        audio.clearError()
+        resetStreamingTempoSkipCycle()
+        audio.prepareForStreamingPlayback()
+        audio.setStreamingBeatAlignment(bpm: nil, beatOffsetSeconds: nil)
+        if audio.state == .playing {
+            audio.pause()
+        }
+        Task {
+            await streaming.playCurrentPlaylistEntry(entry, playbackRate: 1.0)
+            applyStreamingTempoAndAlignment()
+        }
+    }
+
+    private func openFullAppleMusicPlaylistPickerIfRequested() {
+        guard openAppleMusicPlaylistPickerAfterCurrentSheet else { return }
+        openAppleMusicPlaylistPickerAfterCurrentSheet = false
+        showAppleMusicStreamingPlaylists = true
     }
 
     private func handlePrimaryPlayback() {

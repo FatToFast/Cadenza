@@ -331,3 +331,78 @@ private struct PlaylistEntryBPMLookup: Sendable, Hashable {
     let title: String
     let artist: String?
 }
+
+@MainActor
+struct AppleMusicCurrentPlaylistSheet: View {
+    let playlistName: String
+    let entries: [Playlist.Entry]
+    let currentEntryID: String?
+    let bpmValue: (Playlist.Entry) -> Double?
+    let onSelect: (Playlist.Entry) -> Void
+    let onChooseAnotherPlaylist: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(entries, id: \.id) { entry in
+                    Button {
+                        onSelect(entry)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.title)
+                                    .foregroundColor(.cadenzaTextPrimary)
+                                    .lineLimit(2)
+                                Text(entry.artistName)
+                                    .font(.cadenzaCaption)
+                                    .foregroundColor(.cadenzaTextSecondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            if let bpm = bpmValue(entry) {
+                                Text("\(Int(bpm.rounded())) BPM")
+                                    .font(.cadenzaCaption)
+                                    .foregroundColor(.cadenzaTextSecondary)
+                                    .lineLimit(1)
+                            }
+
+                            if currentEntryID == entry.id.rawValue {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .foregroundColor(.cadenzaAccent)
+                                    .accessibilityLabel("현재 재생 중")
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Section {
+                    Button {
+                        onChooseAnotherPlaylist()
+                        dismiss()
+                    } label: {
+                        Label("다른 플레이리스트 선택", systemImage: "rectangle.stack")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .foregroundColor(.cadenzaAccent)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.cadenzaBackground)
+            .navigationTitle(playlistName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
