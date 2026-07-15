@@ -38,7 +38,7 @@ enum OriginalBPMSource: Sendable, Equatable {
         case .analysis:
             return "오디오 파형을 분석해 BPM과 박자 시작점을 추정했습니다. 필요하면 직접 수정할 수 있습니다."
         case .assumedDefault:
-            return "메타데이터가 없어 120 BPM으로 가정했습니다. 정확한 속도를 위해 직접 입력하세요."
+            return "원곡 BPM 확인이 필요합니다. 다시 분석하거나 직접 입력하세요."
         case .preset:
             return "샘플 프리셋의 기본 BPM을 적용했습니다. 필요하면 직접 수정할 수 있습니다."
         case .manual:

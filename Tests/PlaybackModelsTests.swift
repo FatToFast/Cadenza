@@ -255,7 +255,8 @@ final class PlaybackModelsTests: XCTestCase {
     func testMetadataAndAssumedDefaultHelpersDescribeTheirSources() {
         XCTAssertTrue(OriginalBPMSource.metadata.helperText.contains("메타데이터"))
         XCTAssertTrue(OriginalBPMSource.analysis.helperText.contains("분석"))
-        XCTAssertTrue(OriginalBPMSource.assumedDefault.helperText.contains("120 BPM"))
+        XCTAssertTrue(OriginalBPMSource.assumedDefault.helperText.contains("BPM 확인"))
+        XCTAssertFalse(OriginalBPMSource.assumedDefault.helperText.contains("120 BPM"))
     }
 
     func testTempoPlanUsesNativeCadenceInsideUpwardWindow() {
