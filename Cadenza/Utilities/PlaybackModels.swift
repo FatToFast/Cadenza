@@ -589,7 +589,7 @@ struct RunningCadenceFit: Sendable, Equatable {
         case .usable:
             return "사용 가능"
         case .awkward:
-            return "박자 주의"
+            return "큰 폭 가속"
         case .unsuitable:
             return "러닝 부적합"
         case .unknown:

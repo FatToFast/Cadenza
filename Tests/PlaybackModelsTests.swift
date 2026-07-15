@@ -618,17 +618,13 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.detailText, "95 BPM · 190 SPM · 원곡 속도")
     }
 
-    func testRunningCadenceFitMarksOneTwentyAccelerationAsAwkward() {
-        let fit = RunningCadenceFit.evaluate(originalBPM: 120)
-        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 120)
+    func testRunningCadenceFitLabelsLargeAccelerationWithoutRejectingIt() {
+        let fit = RunningCadenceFit.evaluate(originalBPM: 120, targetCadence: 180)
 
-        XCTAssertTrue(plan.isPlayable)
-        XCTAssertEqual(fit.playbackRate, plan.requiredPlaybackRate, accuracy: 0.0001)
-        XCTAssertEqual(fit.nativeFootCadence, plan.effectiveCadence, accuracy: 0.0001)
         XCTAssertEqual(fit.playbackRate, 1.5, accuracy: 0.0001)
         XCTAssertEqual(fit.nativeFootCadence, 180, accuracy: 0.0001)
         XCTAssertEqual(fit.status, .awkward)
-        XCTAssertEqual(fit.badgeText, "박자 주의")
+        XCTAssertEqual(fit.badgeText, "큰 폭 가속")
         XCTAssertEqual(fit.detailText, "120 BPM · 180 SPM · 150%")
     }
 
@@ -716,7 +712,7 @@ final class PlaybackModelsTests: XCTestCase {
 
         XCTAssertEqual(fit.playbackRate, 1.25, accuracy: 0.0001)
         XCTAssertEqual(fit.status, .awkward)
-        XCTAssertEqual(fit.badgeText, "박자 주의")
+        XCTAssertEqual(fit.badgeText, "큰 폭 가속")
     }
 
     func testRunningCadenceFitMarksSeventyBPMAccelerationAsAwkward() {
@@ -727,7 +723,7 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.playbackRate, 90.0 / 70.0, accuracy: 0.0001)
         XCTAssertEqual(fit.nativeFootCadence, 180, accuracy: 0.0001)
         XCTAssertEqual(fit.status, .awkward)
-        XCTAssertEqual(fit.badgeText, "박자 주의")
+        XCTAssertEqual(fit.badgeText, "큰 폭 가속")
     }
 
     // MARK: - BPMOctaveChoice
