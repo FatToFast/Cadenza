@@ -2,12 +2,14 @@
 
 > [!NOTE]
 > The deterministic queue-selection and cached-playlist work in this plan remains relevant. Its tempo-origin/rejection steps were subsequently superseded by `2026-07-16-acceleration-only-tempo-policy.md`: confirmed 30...300 BPM tracks are never rejected or auto-skipped for cadence/rate, and the temporary `StreamingEntryOrigin`/tempo-rejection gate described below was removed. Tempo-related snippets are historical implementation context only.
+>
+> The explicit entry-array queue shown in historical task snippets was also replaced after it produced MusicKit `Domain error 6` on device. The final implementation retains the detailed `Playlist` returned by `playlist.with(.entries)` and constructs `ApplicationMusicPlayer.Queue(playlist:startingAt:)` with an entry from that same detailed context.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make Apple Music playlist row selection start the exact requested entry and let users switch within the already-loaded current playlist without reloading the library.
 
-**Architecture:** Treat the loaded `[Playlist.Entry]` array as the single source of truth, locate the selected entry by its playlist-entry ID, and construct an explicit `ApplicationMusicPlayer.Queue(for:startingAt:)` from that same array. Keep a lightweight playlist session in `AppleMusicStreamingController`, verify MusicKit's prepared queue entry before playback, and expose the cached session to a SwiftUI current-playlist sheet. Tempo playability is governed separately by the acceleration-only policy.
+**Architecture:** Preserve the detailed `Playlist` and its loaded `[Playlist.Entry]` array as one queue context, locate the selected entry by its playlist-entry ID, and construct `ApplicationMusicPlayer.Queue(playlist:startingAt:)` from that detailed playlist and matching entry. Keep this playlist session in `AppleMusicStreamingController`, verify MusicKit's prepared queue entry before playback, and expose the cached entries to a SwiftUI current-playlist sheet. Tempo playability is governed separately by the acceleration-only policy.
 
 **Tech Stack:** Swift 6, SwiftUI, MusicKit `ApplicationMusicPlayer`, Combine, XCTest, Xcode 26.4.
 
