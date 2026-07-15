@@ -1,10 +1,13 @@
 # Apple Music Current Playlist Selection Implementation Plan
 
+> [!NOTE]
+> The deterministic queue-selection and cached-playlist work in this plan remains relevant. Its tempo-origin/rejection steps were subsequently superseded by `2026-07-16-acceleration-only-tempo-policy.md`: confirmed 30...300 BPM tracks are never rejected or auto-skipped for cadence/rate, and the temporary `StreamingEntryOrigin`/tempo-rejection gate described below was removed. Tempo-related snippets are historical implementation context only.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make Apple Music playlist row selection start the exact requested entry and let users switch within the already-loaded current playlist without reloading the library.
 
-**Architecture:** Treat the loaded `[Playlist.Entry]` array as the single source of truth, locate the selected entry by its playlist-entry ID, and construct an explicit `ApplicationMusicPlayer.Queue(for:startingAt:)` from that same array. Keep a lightweight playlist session in `AppleMusicStreamingController`, verify MusicKit's prepared queue entry before playback, and expose the cached session to a SwiftUI current-playlist sheet. Track whether the current entry came from an explicit row selection or queue advancement so tempo rejection never silently changes a directly selected song.
+**Architecture:** Treat the loaded `[Playlist.Entry]` array as the single source of truth, locate the selected entry by its playlist-entry ID, and construct an explicit `ApplicationMusicPlayer.Queue(for:startingAt:)` from that same array. Keep a lightweight playlist session in `AppleMusicStreamingController`, verify MusicKit's prepared queue entry before playback, and expose the cached session to a SwiftUI current-playlist sheet. Tempo playability is governed separately by the acceleration-only policy.
 
 **Tech Stack:** Swift 6, SwiftUI, MusicKit `ApplicationMusicPlayer`, Combine, XCTest, Xcode 26.4.
 
@@ -299,11 +302,13 @@ git commit -m "fix: start Apple Music queue at selected entry"
 
 ---
 
-### Task 3: Prevent automatic skipping after direct selection
+### Task 3: [Superseded] Prevent automatic skipping after direct selection
 
 **Files:**
 - Modify: `Cadenza/Views/PlayerView.swift:1085-1131`
 - Test: `Tests/QueueItemTests.swift`
+
+> This task captured an intermediate policy. The current implementation removes the origin-specific rejection gate entirely: every confirmed supported BPM remains on the selected/current track and uses the acceleration-only plan. Missing or invalid BPM requests confirmation without cadence-based auto-skip.
 
 **Step 1: Add the behavior at the policy boundary**
 
@@ -478,8 +483,8 @@ Expected: install and launch succeed.
 - Confirm each selected title and audible track match immediately.
 - Open `현재 플레이리스트` while playing and choose another entry.
 - Confirm the cached sheet appears instantly without returning to the playlist library.
-- Select a tempo-rejected entry and confirm it remains selected, pauses, and shows the cadence-range message instead of changing tracks.
-- Let queue playback advance naturally and confirm tempo-rejected entries may still be skipped.
+- Select confirmed-BPM entries requiring large acceleration and confirm each remains selected, plays with `큰 폭 가속`, and never shows a cadence-range error.
+- Let queue playback advance naturally and confirm confirmed-BPM entries are not skipped because of cadence or playback rate.
 
 **Step 5: Review the final diff and commit any verification-only adjustments**
 

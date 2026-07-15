@@ -38,23 +38,25 @@ func testTempoPlanAcceleratesNinetySixBPMToNextHigherFold() {
 
 ```swift
 func testTempoPlanMakesEverySupportedOriginalBPMPlayableWithoutSlowing() {
-    for originalBPM in stride(from: 30.0, through: 300.0, by: 1.0) {
-        let plan = BPMRange.tempoPlan(
-            targetCadence: 180,
-            originalBPM: originalBPM
-        )
+    for targetCadence in stride(from: 140.0, through: 200.0, by: 1.0) {
+        for originalBPM in stride(from: 30.0, through: 300.0, by: 1.0) {
+            let plan = BPMRange.tempoPlan(
+                targetCadence: targetCadence,
+                originalBPM: originalBPM
+            )
 
-        XCTAssertTrue(plan.isPlayable, "BPM: \(originalBPM)")
-        XCTAssertGreaterThanOrEqual(
-            plan.requiredPlaybackRate,
-            1.0,
-            "BPM: \(originalBPM)"
-        )
-        XCTAssertLessThanOrEqual(
-            plan.requiredPlaybackRate,
-            Double(BPMRange.rateMax),
-            "BPM: \(originalBPM)"
-        )
+            XCTAssertTrue(plan.isPlayable, "BPM: \(originalBPM)")
+            XCTAssertGreaterThanOrEqual(
+                plan.requiredPlaybackRate,
+                1.0,
+                "BPM: \(originalBPM)"
+            )
+            XCTAssertLessThanOrEqual(
+                plan.requiredPlaybackRate,
+                Double(BPMRange.rateMax),
+                "BPM: \(originalBPM)"
+            )
+        }
     }
 }
 ```
@@ -161,7 +163,7 @@ return TempoPlan(
 )
 ```
 
-Keep the original-speed candidates `[1.0, 2.0, 4.0]` and the existing `foldedMusicalTarget` candidate family `[0.25, 0.5, 1.0, 2.0, 4.0]`. The helper already chooses the smallest candidate whose playback rate is at least 1.0.
+Keep the original-speed candidates `[0.5, 1.0, 2.0, 4.0]` and the existing `foldedMusicalTarget` candidate family `[0.25, 0.5, 1.0, 2.0, 4.0]`. The helper already chooses the smallest candidate whose playback rate is at least 1.0. The 0.5 native relation preserves original speed for cases such as original 280 BPM at target 140 SPM.
 
 **Step 3: Simplify obsolete rejection declarations**
 
@@ -178,6 +180,8 @@ Expected: PASS. Specifically verify:
 - 95 BPM → 1.0x, 190 SPM
 - 96 BPM → 180 BPM target, 1.875x, 180 SPM
 - 120 BPM → 180 BPM target, 1.5x, 180 SPM
+- 70 BPM → 90 BPM target, about 1.286x, 180 SPM
+- 280 BPM at target 140 → native 0.5 relation, 1.0x, 140 SPM
 
 **Step 5: Commit the policy change**
 

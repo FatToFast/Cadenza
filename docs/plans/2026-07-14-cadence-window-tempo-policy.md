@@ -1,4 +1,7 @@
-# Cadence Window Tempo Policy Implementation Plan
+# [SUPERSEDED] Cadence Window Tempo Policy Implementation Plan
+
+> [!WARNING]
+> **Do not execute this plan. It was superseded by `2026-07-16-acceleration-only-tempo-policy.md`.** Its 1.25x cap, slowdown/high-rate rejection, `.rateOutOfRange` handling, and cadence-based queue auto-skip are not current behavior. Confirmed 30...300 BPM tracks now stay playable without slowing; native relations are `[0.5, 1, 2, 4]`, otherwise playback accelerates to the smallest higher octave fold. The remaining content is historical only.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
