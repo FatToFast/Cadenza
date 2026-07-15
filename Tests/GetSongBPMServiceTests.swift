@@ -2,6 +2,13 @@ import XCTest
 @testable import Cadenza
 
 final class GetSongBPMServiceTests: XCTestCase {
+    private struct PersistedBPMResult: Codable {
+        let bpm: Double
+        let matchedArtist: String
+        let matchedTitle: String
+        let storedAt: Date
+    }
+
     override func setUp() {
         super.setUp()
         URLProtocol.registerClass(MockURLProtocol.self)
@@ -198,6 +205,85 @@ final class GetSongBPMServiceTests: XCTestCase {
 
         XCTAssertEqual(metadataCached?.bpm ?? 0, 78.97, accuracy: 0.001)
         XCTAssertEqual(MockURLProtocol.requestCount, 0)
+    }
+
+    func testInvalidPersistedBPMIsCacheMissAndAllowsProviderLookup() async throws {
+        for (index, bpm) in [29.0, 301.0, .nan, .infinity].enumerated() {
+            let suiteName = "\(persistentDefaultsSuiteName).invalid.\(index)"
+            clearPersistentDefaults(suiteName: suiteName)
+            defer { clearPersistentDefaults(suiteName: suiteName) }
+            try persistRawBPM(bpm, suiteName: suiteName)
+            MockURLProtocol.reset()
+            MockURLProtocol.stubResponse = Self.adeleHelloPayload
+            let service = GetSongBPMService(
+                session: makeSession(),
+                persistentStorage: .suiteName(suiteName),
+                apiKeyProvider: { "test-key" }
+            )
+
+            let cached = await service.cachedBPM(title: "Hello", artist: "Adele")
+            let fetched = await service.lookupBPM(title: "Hello", artist: "Adele")
+
+            XCTAssertNil(cached, "BPM: \(bpm)")
+            XCTAssertEqual(fetched?.bpm, 78, "BPM: \(bpm)")
+            XCTAssertEqual(MockURLProtocol.requestCount, 1, "BPM: \(bpm)")
+        }
+    }
+
+    func testPersistentCachePreservesSupportedBPMBoundaries() async {
+        for (index, bpm) in [30.0, 300.0].enumerated() {
+            let suiteName = "\(persistentDefaultsSuiteName).boundary.\(index)"
+            clearPersistentDefaults(suiteName: suiteName)
+            defer { clearPersistentDefaults(suiteName: suiteName) }
+            let writer = GetSongBPMService(
+                session: makeSession(),
+                persistentStorage: .suiteName(suiteName),
+                apiKeyProvider: { nil }
+            )
+            await writer.recordBPM(bpm, title: "Boundary", artist: "Artist")
+            let reader = GetSongBPMService(
+                session: makeSession(),
+                persistentStorage: .suiteName(suiteName),
+                apiKeyProvider: { nil }
+            )
+
+            let cached = await reader.cachedBPM(title: "Boundary", artist: "Artist")
+
+            XCTAssertEqual(cached?.bpm, bpm)
+        }
+    }
+
+    func testInvalidProviderResultIsNotCachedAndLaterLookupRetries() async {
+        let suiteName = "\(persistentDefaultsSuiteName).provider-retry"
+        clearPersistentDefaults(suiteName: suiteName)
+        defer { clearPersistentDefaults(suiteName: suiteName) }
+        MockURLProtocol.responseProvider = { _ in
+            MockURLProtocol.requestCount == 1
+                ? Self.invalidAdeleHelloPayload
+                : Self.adeleHelloPayload
+        }
+        let service = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            apiKeyProvider: { "test-key" }
+        )
+
+        let first = await service.lookupBPM(title: "Hello", artist: "Adele")
+        let freshService = GetSongBPMService(
+            session: makeSession(),
+            persistentStorage: .suiteName(suiteName),
+            apiKeyProvider: { "test-key" }
+        )
+        let persistedAfterInvalid = await freshService.cachedBPM(
+            title: "Hello",
+            artist: "Adele"
+        )
+        let second = await service.lookupBPM(title: "Hello", artist: "Adele")
+
+        XCTAssertNil(first)
+        XCTAssertNil(persistedAfterInvalid)
+        XCTAssertEqual(second?.bpm, 78)
+        XCTAssertEqual(MockURLProtocol.requestCount, 2)
     }
 
     func testSoundchartsDoubleTimeTempoIsNormalizedBeforeCaching() async {
@@ -593,11 +679,39 @@ final class GetSongBPMServiceTests: XCTestCase {
         UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
     }
 
+    private func persistRawBPM(_ bpm: Double, suiteName: String) throws {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+        let data = try encoder.encode([
+            "metadata:hello|adele": PersistedBPMResult(
+                bpm: bpm,
+                matchedArtist: "Adele",
+                matchedTitle: "Hello",
+                storedAt: Date()
+            ),
+        ])
+        UserDefaults(suiteName: suiteName)?.set(
+            data,
+            forKey: "com.jy.cadenza.bpm.lookup-cache.v2"
+        )
+    }
+
     private static let adeleHelloPayload: Data = #"""
     {"search":[
       {"id":"mqxA60","title":"Hello Babe","tempo":"98",
        "artist":{"name":"Madeleine Peyroux"}},
       {"id":"Z8wOkE","title":"Hello","tempo":"78",
+       "artist":{"name":"Adele"}}
+    ]}
+    """#.data(using: .utf8)!
+
+    private static let invalidAdeleHelloPayload: Data = #"""
+    {"search":[
+      {"id":"invalid","title":"Hello","tempo":"301",
        "artist":{"name":"Adele"}}
     ]}
     """#.data(using: .utf8)!

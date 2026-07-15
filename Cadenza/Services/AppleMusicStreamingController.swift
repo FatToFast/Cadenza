@@ -26,10 +26,24 @@ struct StreamingBPMResolution: Equatable, Sendable {
 
 enum StreamingBPMPreloadDecision: Equatable, Sendable {
     case apply(StreamingBPMResult)
-    case ignore
+    case ignore(currentResult: StreamingBPMResult?)
 
-    static func decide(delayedResult: StreamingBPMResult) -> Self {
-        guard let delayedResult = delayedResult.validated else { return .ignore }
+    var nextPublishedResult: StreamingBPMResult? {
+        switch self {
+        case .apply(let result):
+            return result
+        case .ignore(let currentResult):
+            return currentResult
+        }
+    }
+
+    static func decide(
+        currentResult: StreamingBPMResult?,
+        delayedResult: StreamingBPMResult
+    ) -> Self {
+        guard let delayedResult = delayedResult.validated else {
+            return .ignore(currentResult: currentResult)
+        }
         return .apply(delayedResult)
     }
 }
@@ -652,9 +666,14 @@ final class AppleMusicStreamingController: ObservableObject {
                         beatSyncStatus: .bpmOnly,
                         beatSyncIssue: .missingBeatGrid
                     )
-                    guard case .apply(let bpmResult) = StreamingBPMPreloadDecision.decide(
+                    let entryIdentity = self.queueIdentity(for: entry)
+                    let decision = StreamingBPMPreloadDecision.decide(
+                        currentResult: self.currentQueueIdentity == entryIdentity
+                            ? self.publishedBPMResult
+                            : nil,
                         delayedResult: delayedResult
-                    ) else { return }
+                    )
+                    guard case .apply(let bpmResult) = decision else { return }
                     self.cacheBPMResult(
                         bpmResult,
                         songID: lookup.appleMusicID,
@@ -662,9 +681,8 @@ final class AppleMusicStreamingController: ObservableObject {
                         artist: entry.artistName,
                         albumTitle: entry.albumTitle
                     )
-                    let entryIdentity = self.queueIdentity(for: entry)
                     if self.currentQueueIdentity == entryIdentity {
-                        self.applyResolvedBPM(bpmResult)
+                        self.applyResolvedBPM(decision.nextPublishedResult)
                     }
                     self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
                 }
@@ -1142,6 +1160,20 @@ final class AppleMusicStreamingController: ObservableObject {
         currentBeatAlignmentConfidence = validatedResult?.confidence
         currentBeatSyncStatus = validatedResult?.beatSyncStatus ?? .needsConfirmation
         currentBeatSyncIssue = validatedResult?.beatSyncIssue ?? .missingBPM
+    }
+
+    private var publishedBPMResult: StreamingBPMResult? {
+        guard let bpm = currentBPM,
+              let source = currentBPMSource else { return nil }
+        return StreamingBPMResult(
+            bpm: bpm,
+            source: source,
+            beatOffsetSeconds: currentBeatOffsetSeconds,
+            beatTimesSeconds: currentBeatTimesSeconds,
+            confidence: currentBeatAlignmentConfidence,
+            beatSyncStatus: currentBeatSyncStatus,
+            beatSyncIssue: currentBeatSyncIssue
+        ).validated
     }
 
     private func currentTrackOverrideBPM() -> Double? {

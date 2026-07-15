@@ -258,16 +258,16 @@ final class StreamingBPMResolverTests: XCTestCase {
                 beatSyncIssue: .missingBeatGrid
             )
             let decision = StreamingBPMPreloadDecision.decide(
+                currentResult: existingResult,
                 delayedResult: delayedResult
             )
-            var publishedResult = existingResult
 
-            if case .apply(let result) = decision {
-                publishedResult = result
-            }
-
-            XCTAssertEqual(decision, .ignore, "BPM: \(bpm)")
-            XCTAssertEqual(publishedResult, existingResult, "BPM: \(bpm)")
+            XCTAssertEqual(
+                decision,
+                .ignore(currentResult: existingResult),
+                "BPM: \(bpm)"
+            )
+            XCTAssertEqual(decision.nextPublishedResult, existingResult, "BPM: \(bpm)")
         }
     }
 
@@ -282,10 +282,13 @@ final class StreamingBPMResolverTests: XCTestCase {
             beatSyncIssue: .missingBeatGrid
         )
 
-        XCTAssertEqual(
-            StreamingBPMPreloadDecision.decide(delayedResult: delayedResult),
-            .apply(delayedResult)
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: nil,
+            delayedResult: delayedResult
         )
+
+        XCTAssertEqual(decision, .apply(delayedResult))
+        XCTAssertEqual(decision.nextPublishedResult, delayedResult)
     }
 
     func testFallsBackToPreviewAnalysisWhenGetSongBPMHasNoMatch() async {

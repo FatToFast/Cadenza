@@ -16,6 +16,15 @@ actor GetSongBPMService {
         let bpm: Double
         let matchedArtist: String
         let matchedTitle: String
+
+        var validated: Result? {
+            BPMRange.validatedOriginalBPM(bpm).map { _ in self }
+        }
+    }
+
+    private struct ProviderLookupResolution: Sendable {
+        let result: Result?
+        let shouldCacheMiss: Bool
     }
 
     struct TrackLookup: Hashable, Sendable {
@@ -63,7 +72,7 @@ actor GetSongBPMService {
     private let spotifyClientSecretProvider: @Sendable () -> String?
     private let persistentCache: PersistentBPMCache?
     private var cache: [LookupKey: Result?] = [:]
-    private var inFlightLookups: [LookupKey: Task<Result?, Never>] = [:]
+    private var inFlightLookups: [LookupKey: Task<ProviderLookupResolution, Never>] = [:]
     private var spotifyAccessToken: SpotifyAccessToken?
     private let logger = Logger(subsystem: "com.jy.cadenza", category: "GetSongBPM")
 
@@ -107,7 +116,7 @@ actor GetSongBPMService {
             print("[bpm_lookup] cache_hit title=\(title) artist=\(artist ?? "") hasResult=\(cached.result != nil)")
             return cached.result
         }
-        if let override = curatedOverride(title: title, artist: artist) {
+        if let override = curatedOverride(title: title, artist: artist)?.validated {
             logger.notice("[bpm_lookup] curated_override title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) bpm=\(override.bpm)")
             print("[bpm_lookup] curated_override title=\(title) artist=\(artist ?? "") bpm=\(override.bpm)")
             cache.updateValue(override, forKey: key)
@@ -116,22 +125,27 @@ actor GetSongBPMService {
         if let inFlightLookup = inFlightLookups[key] {
             logger.notice("[bpm_lookup] join_inflight title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public)")
             print("[bpm_lookup] join_inflight title=\(title) artist=\(artist ?? "")")
-            return await inFlightLookup.value
+            return await inFlightLookup.value.result
         }
 
         logger.notice("[bpm_lookup] start title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) appleMusicID=\(appleMusicID ?? "", privacy: .public) isrc=\(isrc ?? "", privacy: .public)")
         print("[bpm_lookup] start title=\(title) artist=\(artist ?? "") appleMusicID=\(appleMusicID ?? "") isrc=\(isrc ?? "")")
-        let lookupTask = Task<Result?, Never> { [weak self] in
-            guard let self else { return nil as Result? }
+        let lookupTask = Task<ProviderLookupResolution, Never> { [weak self] in
+            guard let self else {
+                return ProviderLookupResolution(result: nil, shouldCacheMiss: false)
+            }
             return await self.performLookupResult(title: title, artist: artist, appleMusicID: appleMusicID, isrc: isrc)
         }
         inFlightLookups[key] = lookupTask
-        let result = await lookupTask.value
-        cache.updateValue(result, forKey: key)
+        let resolution = await lookupTask.value
+        let result = resolution.result
         if let result {
+            cache.updateValue(result, forKey: key)
             for cacheKey in persistentCacheKeys(for: key) {
                 persistentCache?.store(result, for: cacheKey)
             }
+        } else if resolution.shouldCacheMiss {
+            cache.updateValue(nil, forKey: key)
         }
         logger.notice("[bpm_lookup] complete title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public) hasResult=\(result != nil) bpm=\(result?.bpm ?? 0)")
         print("[bpm_lookup] complete title=\(title) artist=\(artist ?? "") hasResult=\(result != nil) bpm=\(result?.bpm ?? 0)")
@@ -145,7 +159,7 @@ actor GetSongBPMService {
         if cached.found {
             return cached.result
         }
-        return curatedOverride(title: title, artist: artist)
+        return curatedOverride(title: title, artist: artist)?.validated
     }
 
     func recordBPM(
@@ -155,7 +169,7 @@ actor GetSongBPMService {
         appleMusicID: String? = nil,
         isrc: String? = nil
     ) {
-        guard bpm.isFinite, bpm >= BPMRange.originalMin, bpm <= BPMRange.originalMax else { return }
+        guard let bpm = BPMRange.validatedOriginalBPM(bpm) else { return }
 
         let result = Result(
             bpm: bpm,
@@ -169,35 +183,66 @@ actor GetSongBPMService {
         }
     }
 
-    private func performLookupResult(title: String, artist: String?, appleMusicID: String?, isrc: String?) async -> Result? {
-        if let result = try? await performSoundchartsLookup(appleMusicID: appleMusicID, isrc: isrc) {
+    private func performLookupResult(
+        title: String,
+        artist: String?,
+        appleMusicID: String?,
+        isrc: String?
+    ) async -> ProviderLookupResolution {
+        var didRejectInvalidResult = false
+
+        func accepted(_ result: Result) -> Result? {
+            guard let result = result.validated else {
+                didRejectInvalidResult = true
+                return nil
+            }
+            return result
+        }
+
+        if let candidate = try? await performSoundchartsLookup(
+            appleMusicID: appleMusicID,
+            isrc: isrc
+        ), let result = accepted(candidate) {
             logger.notice("[bpm_lookup] provider=soundcharts_direct title=\(title, privacy: .public) bpm=\(result.bpm)")
             print("[bpm_lookup] provider=soundcharts_direct title=\(title) bpm=\(result.bpm)")
-            return result
+            return ProviderLookupResolution(result: result, shouldCacheMiss: false)
         }
         if isrc == nil,
            let spotifyISRC = try? await performSpotifyISRCLookup(title: title, artist: artist) {
             logger.notice("[bpm_lookup] provider=spotify_isrc title=\(title, privacy: .public) isrc=\(spotifyISRC, privacy: .public)")
             print("[bpm_lookup] provider=spotify_isrc title=\(title) isrc=\(spotifyISRC)")
-            if let result = try? await performSoundchartsLookup(appleMusicID: nil, isrc: spotifyISRC) {
+            if let candidate = try? await performSoundchartsLookup(
+                appleMusicID: nil,
+                isrc: spotifyISRC
+            ), let result = accepted(candidate) {
                 logger.notice("[bpm_lookup] provider=soundcharts_spotify_isrc title=\(title, privacy: .public) bpm=\(result.bpm)")
                 print("[bpm_lookup] provider=soundcharts_spotify_isrc title=\(title) bpm=\(result.bpm)")
-                return result
+                return ProviderLookupResolution(result: result, shouldCacheMiss: false)
             }
         }
-        if let result = try? await performSongstatsLookup(title: title, artist: artist, appleMusicID: appleMusicID) {
+        if let candidate = try? await performSongstatsLookup(
+            title: title,
+            artist: artist,
+            appleMusicID: appleMusicID
+        ), let result = accepted(candidate) {
             logger.notice("[bpm_lookup] provider=songstats title=\(title, privacy: .public) bpm=\(result.bpm)")
             print("[bpm_lookup] provider=songstats title=\(title) bpm=\(result.bpm)")
-            return result
+            return ProviderLookupResolution(result: result, shouldCacheMiss: false)
         }
-        if let result = try? await performLookup(title: title, artist: artist) {
+        if let candidate = try? await performLookup(
+            title: title,
+            artist: artist
+        ), let result = accepted(candidate) {
             logger.notice("[bpm_lookup] provider=getsongbpm title=\(title, privacy: .public) bpm=\(result.bpm)")
             print("[bpm_lookup] provider=getsongbpm title=\(title) bpm=\(result.bpm)")
-            return result
+            return ProviderLookupResolution(result: result, shouldCacheMiss: false)
         }
         logger.notice("[bpm_lookup] provider=none title=\(title, privacy: .public) artist=\(artist ?? "", privacy: .public)")
         print("[bpm_lookup] provider=none title=\(title) artist=\(artist ?? "")")
-        return nil
+        return ProviderLookupResolution(
+            result: nil,
+            shouldCacheMiss: !didRejectInvalidResult
+        )
     }
 
     func prefetchBPMs(_ tracks: [TrackLookup], maxConcurrentRequests: Int = 1) async {
@@ -794,6 +839,11 @@ actor GetSongBPMService {
 
     private func cachedLookup(for key: LookupKey) -> (found: Bool, result: Result?) {
         if let cached = cache[key] {
+            guard let cached else { return (true, nil) }
+            guard let cached = cached.validated else {
+                cache.removeValue(forKey: key)
+                return (false, nil)
+            }
             return (true, cached)
         }
 
@@ -936,15 +986,23 @@ private final class PersistentBPMCache: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let stored = loadCache()[key] else { return nil }
-        return GetSongBPMService.Result(
+        var cache = loadCache()
+        guard let stored = cache[key] else { return nil }
+        let result = GetSongBPMService.Result(
             bpm: stored.bpm,
             matchedArtist: stored.matchedArtist,
             matchedTitle: stored.matchedTitle
         )
+        guard let result = result.validated else {
+            cache.removeValue(forKey: key)
+            persist(cache)
+            return nil
+        }
+        return result
     }
 
     func store(_ result: GetSongBPMService.Result, for key: String) {
+        guard let result = result.validated else { return }
         lock.lock()
         defer { lock.unlock() }
 
@@ -966,8 +1024,7 @@ private final class PersistentBPMCache: @unchecked Sendable {
             }
         }
 
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        defaults.set(data, forKey: storageKey)
+        persist(cache)
     }
 
     private func loadCache() -> [String: StoredResult] {
@@ -976,6 +1033,11 @@ private final class PersistentBPMCache: @unchecked Sendable {
             return [:]
         }
         return decoded
+    }
+
+    private func persist(_ cache: [String: StoredResult]) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        defaults.set(data, forKey: storageKey)
     }
 }
 
