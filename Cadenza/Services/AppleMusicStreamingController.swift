@@ -667,12 +667,16 @@ final class AppleMusicStreamingController: ObservableObject {
                         beatSyncIssue: .missingBeatGrid
                     )
                     let entryIdentity = self.queueIdentity(for: entry)
+                    let isCurrentEntry = self.currentQueueIdentity == entryIdentity
                     let decision = StreamingBPMPreloadDecision.decide(
-                        currentResult: self.currentQueueIdentity == entryIdentity
+                        currentResult: isCurrentEntry
                             ? self.publishedBPMResult
                             : nil,
                         delayedResult: delayedResult
                     )
+                    if isCurrentEntry {
+                        self.applyResolvedBPM(decision.nextPublishedResult)
+                    }
                     guard case .apply(let bpmResult) = decision else { return }
                     self.cacheBPMResult(
                         bpmResult,
@@ -681,9 +685,6 @@ final class AppleMusicStreamingController: ObservableObject {
                         artist: entry.artistName,
                         albumTitle: entry.albumTitle
                     )
-                    if self.currentQueueIdentity == entryIdentity {
-                        self.applyResolvedBPM(decision.nextPublishedResult)
-                    }
                     self.logger.notice("[bpm_preload] success title=\(entry.title, privacy: .public) artist=\(entry.artistName, privacy: .public) bpm=\(result.bpm)")
                 }
             }
