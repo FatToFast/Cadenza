@@ -44,7 +44,13 @@ enum StreamingBPMPreloadDecision: Equatable, Sendable {
         guard let delayedResult = delayedResult.validated else {
             return .ignore(currentResult: currentResult)
         }
-        return .apply(delayedResult)
+
+        switch currentResult?.source {
+        case .analysis?, .manual?:
+            return .ignore(currentResult: currentResult)
+        default:
+            return .apply(delayedResult)
+        }
     }
 }
 

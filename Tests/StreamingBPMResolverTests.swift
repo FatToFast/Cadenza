@@ -291,6 +291,64 @@ final class StreamingBPMResolverTests: XCTestCase {
         XCTAssertEqual(decision.nextPublishedResult, delayedResult)
     }
 
+    func testDelayedMetadataPreservesUserRefreshedAnalysisResult() {
+        let analysisResult = StreamingBPMResult(
+            bpm: 94,
+            source: .analysis,
+            beatOffsetSeconds: 0.12,
+            beatTimesSeconds: [0.12, 0.76],
+            confidence: 0.93,
+            beatSyncStatus: .automaticBeatSync,
+            beatSyncIssue: nil
+        )
+        let delayedMetadataResult = StreamingBPMResult(
+            bpm: 103,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: analysisResult,
+            delayedResult: delayedMetadataResult
+        )
+
+        XCTAssertEqual(decision, .ignore(currentResult: analysisResult))
+        XCTAssertEqual(decision.nextPublishedResult, analysisResult)
+    }
+
+    func testDelayedMetadataPreservesManualResult() {
+        let manualResult = StreamingBPMResult(
+            bpm: 96,
+            source: .manual,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+        let delayedMetadataResult = StreamingBPMResult(
+            bpm: 103,
+            source: .metadata,
+            beatOffsetSeconds: nil,
+            beatTimesSeconds: nil,
+            confidence: nil,
+            beatSyncStatus: .bpmOnly,
+            beatSyncIssue: .missingBeatGrid
+        )
+
+        let decision = StreamingBPMPreloadDecision.decide(
+            currentResult: manualResult,
+            delayedResult: delayedMetadataResult
+        )
+
+        XCTAssertEqual(decision, .ignore(currentResult: manualResult))
+        XCTAssertEqual(decision.nextPublishedResult, manualResult)
+    }
+
     func testFallsBackToPreviewAnalysisWhenGetSongBPMHasNoMatch() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(
