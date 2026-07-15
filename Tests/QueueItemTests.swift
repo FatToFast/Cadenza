@@ -338,6 +338,19 @@ final class QueueItemTests: XCTestCase {
         )
     }
 
+    func testStreamingPlaylistQueueRequiresDetailedPlaylistContext() {
+        XCTAssertTrue(
+            StreamingPlaylistQueuePolicy.canStart(
+                hasDetailedPlaylistContext: true
+            )
+        )
+        XCTAssertFalse(
+            StreamingPlaylistQueuePolicy.canStart(
+                hasDetailedPlaylistContext: false
+            )
+        )
+    }
+
     func testExplicitStreamingSelectionDoesNotAutoSkipRejectedTrack() {
         XCTAssertFalse(
             StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(

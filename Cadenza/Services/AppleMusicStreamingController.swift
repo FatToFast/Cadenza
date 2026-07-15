@@ -232,7 +232,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private var desiredPlaybackRate: Float = 1.0
     private var queuePolicyContext = StreamingQueuePolicyContext.empty
     private var selectionGeneration = 0
-    private var currentPlaylistID: String?
+    private var currentPlaylist: Playlist?
     private var requestedPlaylistIndex: Int?
     private let queueMutationGate = StreamingQueueMutationGate()
     private var isQueueMutationInFlight = false
@@ -347,7 +347,7 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     private func clearCurrentPlaylistSession() {
-        currentPlaylistID = nil
+        currentPlaylist = nil
         currentPlaylistName = nil
         currentPlaylistEntries = []
         currentPlaylistEntryID = nil
@@ -439,8 +439,7 @@ final class AppleMusicStreamingController: ObservableObject {
         }
 
         await playPlaylistEntries(
-            playlistID: playlist.id.rawValue,
-            playlistName: playlist.name,
+            playlist: playlist,
             entries: preloadedEntries,
             plan: plan,
             playbackRate: playbackRate
@@ -451,8 +450,7 @@ final class AppleMusicStreamingController: ObservableObject {
         _ entry: Playlist.Entry,
         playbackRate: Double
     ) async {
-        guard let playlistID = currentPlaylistID,
-              let playlistName = currentPlaylistName,
+        guard let currentPlaylist,
               let plan = StreamingPlaylistSelectionPlan.make(
                 entryIDs: currentPlaylistEntries.map { $0.id.rawValue },
                 selectedEntryID: entry.id.rawValue
@@ -462,8 +460,7 @@ final class AppleMusicStreamingController: ObservableObject {
         }
 
         await playPlaylistEntries(
-            playlistID: playlistID,
-            playlistName: playlistName,
+            playlist: currentPlaylist,
             entries: currentPlaylistEntries,
             plan: plan,
             playbackRate: playbackRate
@@ -471,8 +468,7 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     private func playPlaylistEntries(
-        playlistID: String,
-        playlistName: String,
+        playlist: Playlist,
         entries: [Playlist.Entry],
         plan: StreamingPlaylistSelectionPlan,
         playbackRate: Double
@@ -483,8 +479,8 @@ final class AppleMusicStreamingController: ObservableObject {
         }
         let selectedEntry = entries[plan.selectedIndex]
 
-        currentPlaylistID = playlistID
-        currentPlaylistName = playlistName
+        currentPlaylist = playlist
+        currentPlaylistName = playlist.name
         currentPlaylistEntries = entries
         currentPlaylistEntryID = selectedEntry.id.rawValue
         currentPlaylistIndex = plan.selectedIndex
@@ -527,7 +523,7 @@ final class AppleMusicStreamingController: ObservableObject {
             setShuffleEnabled(false)
             setRepeatEnabled(false)
             let queue = ApplicationMusicPlayer.Queue(
-                for: entries,
+                playlist: playlist,
                 startingAt: selectedEntry
             )
             var expectedPlayableIDs = [selectedEntry.id.rawValue]

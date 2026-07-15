@@ -9,6 +9,7 @@ struct AppleMusicStreamingPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var playlists: [Playlist] = []
+    @State private var detailedPlaylistsByID: [MusicItemID: Playlist] = [:]
     @State private var entriesByPlaylist: [MusicItemID: [Playlist.Entry]] = [:]
     @State private var bpmByEntryID: [String: Double] = [:]
     @State private var bpmLookupAttemptedEntryIDs: Set<String> = []
@@ -132,7 +133,18 @@ struct AppleMusicStreamingPlaylistView: View {
             let visibleEntries = (entriesByPlaylist[playlist.id] ?? []).filter { !hiddenEntryIDs.contains($0.id) }
             ForEach(visibleEntries, id: \.id) { entry in
                 Button {
-                    onEntryPicked(playlist, entry, entriesByPlaylist[playlist.id] ?? [])
+                    let detailedPlaylist = detailedPlaylistsByID[playlist.id]
+                    guard StreamingPlaylistQueuePolicy.canStart(
+                        hasDetailedPlaylistContext: detailedPlaylist != nil
+                    ), let detailedPlaylist else {
+                        errorMessage = "상세 플레이리스트를 다시 불러와 주세요"
+                        return
+                    }
+                    onEntryPicked(
+                        detailedPlaylist,
+                        entry,
+                        entriesByPlaylist[playlist.id] ?? []
+                    )
                     dismiss()
                 } label: {
                     HStack(alignment: .top, spacing: 12) {
@@ -189,6 +201,7 @@ struct AppleMusicStreamingPlaylistView: View {
         do {
             let detailedPlaylist = try await playlist.with(.entries)
             let entries = Array(detailedPlaylist.entries ?? [])
+            detailedPlaylistsByID[playlist.id] = detailedPlaylist
             entriesByPlaylist[playlist.id] = entries
             preloadBPMs(for: entries)
         } catch {

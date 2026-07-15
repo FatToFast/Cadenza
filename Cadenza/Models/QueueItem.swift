@@ -334,6 +334,12 @@ struct StreamingQueueStartVerifier: Sendable, Equatable {
     }
 }
 
+struct StreamingPlaylistQueuePolicy: Sendable, Equatable {
+    static func canStart(hasDetailedPlaylistContext: Bool) -> Bool {
+        hasDetailedPlaylistContext
+    }
+}
+
 enum PlayerErrorRecoveryAction: Sendable, Equatable {
     case showCurrentStreamingPlaylist
     case dismiss
