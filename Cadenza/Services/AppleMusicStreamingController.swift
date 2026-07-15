@@ -530,15 +530,20 @@ final class AppleMusicStreamingController: ObservableObject {
                 for: entries,
                 startingAt: selectedEntry
             )
-            let expectedQueueEntryID = queue.entries.indices.contains(plan.selectedIndex)
-                ? queue.entries[plan.selectedIndex].id
-                : nil
+            var expectedPlayableIDs = [selectedEntry.id.rawValue]
+            if let resolvedItemID = selectedEntry.item?.id.rawValue,
+               resolvedItemID != selectedEntry.id.rawValue {
+                expectedPlayableIDs.append(resolvedItemID)
+            }
             player.queue = queue
             try await player.prepareToPlay()
             guard generation == selectionGeneration else { return }
+            let actualQueueEntry = player.queue.currentEntry
+            let actualPlayableID = actualQueueEntry?.item?.id.rawValue
+                ?? actualQueueEntry?.transientItem?.id.rawValue
             guard StreamingQueueStartVerifier.matches(
-                expectedQueueEntryID: expectedQueueEntryID,
-                actualQueueEntryID: player.queue.currentEntry?.id
+                expectedPlayableIDs: expectedPlayableIDs,
+                actualPlayableID: actualPlayableID
             ) else {
                 failExplicitSelection(
                     generation: generation,

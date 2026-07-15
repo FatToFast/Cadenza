@@ -311,23 +311,29 @@ final class QueueItemTests: XCTestCase {
         )
     }
 
-    func testStreamingQueueStartVerifierRequiresExactQueueEntry() {
+    func testStreamingQueueStartVerifierAcceptsPlaylistOrResolvedSongIdentity() {
         XCTAssertTrue(
             StreamingQueueStartVerifier.matches(
-                expectedQueueEntryID: "queue-4",
-                actualQueueEntryID: "queue-4"
+                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
+                actualPlayableID: "playlist-entry-4"
+            )
+        )
+        XCTAssertTrue(
+            StreamingQueueStartVerifier.matches(
+                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
+                actualPlayableID: "catalog-song-9"
             )
         )
         XCTAssertFalse(
             StreamingQueueStartVerifier.matches(
-                expectedQueueEntryID: "queue-4",
-                actualQueueEntryID: "queue-8"
+                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
+                actualPlayableID: "queue-entry-8"
             )
         )
         XCTAssertFalse(
             StreamingQueueStartVerifier.matches(
-                expectedQueueEntryID: "queue-4",
-                actualQueueEntryID: nil
+                expectedPlayableIDs: ["playlist-entry-4", "catalog-song-9"],
+                actualPlayableID: nil
             )
         )
     }
@@ -417,6 +423,46 @@ final class QueueItemTests: XCTestCase {
         XCTAssertTrue(didCommit)
         XCTAssertEqual(stopCount, 0)
         XCTAssertEqual(commitCount, 1)
+    }
+
+    func testStreamingPlaylistErrorRecoveryShowsCurrentPlaylist() {
+        XCTAssertEqual(
+            PlayerErrorRecoveryPolicy.action(
+                hasStreamingSong: true,
+                hasCurrentStreamingPlaylist: true
+            ),
+            .showCurrentStreamingPlaylist
+        )
+    }
+
+    func testFailedStreamingPlaylistSelectionStillShowsCurrentPlaylist() {
+        XCTAssertEqual(
+            PlayerErrorRecoveryPolicy.action(
+                hasStreamingSong: false,
+                hasCurrentStreamingPlaylist: true
+            ),
+            .showCurrentStreamingPlaylist
+        )
+    }
+
+    func testStreamingSongErrorRecoveryDismissesInsteadOfChoosingFile() {
+        XCTAssertEqual(
+            PlayerErrorRecoveryPolicy.action(
+                hasStreamingSong: true,
+                hasCurrentStreamingPlaylist: false
+            ),
+            .dismiss
+        )
+    }
+
+    func testLocalErrorRecoveryStillOffersAnotherFile() {
+        XCTAssertEqual(
+            PlayerErrorRecoveryPolicy.action(
+                hasStreamingSong: false,
+                hasCurrentStreamingPlaylist: false
+            ),
+            .chooseLocalFile
+        )
     }
 }
 

@@ -945,16 +945,19 @@ struct PlayerView: View {
     // MARK: - Error Banner (DESIGN.md 2.2.2)
 
     private func errorBanner(message: String) -> some View {
-        HStack {
+        let recoveryAction = PlayerErrorRecoveryPolicy.action(
+            hasStreamingSong: streaming.hasSong,
+            hasCurrentStreamingPlaylist: streaming.hasCurrentPlaylist
+        )
+        return HStack {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.cadenzaWarning)
             Text(message)
                 .font(.cadenzaCaption)
                 .foregroundColor(.cadenzaTextPrimary)
             Spacer()
-            Button("다른 파일 선택") {
-                audio.clearError()
-                showFilePicker = true
+            Button(recoveryAction.buttonTitle) {
+                handleErrorRecovery(recoveryAction)
             }
             .font(.cadenzaCaption)
             .foregroundColor(.cadenzaWarning)
@@ -966,6 +969,18 @@ struct PlayerView: View {
                 .stroke(Color.cadenzaWarning, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func handleErrorRecovery(_ action: PlayerErrorRecoveryAction) {
+        audio.clearError()
+        switch action {
+        case .showCurrentStreamingPlaylist:
+            showAppleMusicCurrentPlaylist = true
+        case .dismiss:
+            break
+        case .chooseLocalFile:
+            showFilePicker = true
+        }
     }
 
     // MARK: - File Selection

@@ -326,13 +326,40 @@ struct StreamingPlaylistSelectionPlan: Sendable, Equatable {
 
 struct StreamingQueueStartVerifier: Sendable, Equatable {
     static func matches(
-        expectedQueueEntryID: String?,
-        actualQueueEntryID: String?
+        expectedPlayableIDs: [String],
+        actualPlayableID: String?
     ) -> Bool {
-        guard let expectedQueueEntryID, let actualQueueEntryID else {
-            return false
+        guard let actualPlayableID else { return false }
+        return expectedPlayableIDs.contains(actualPlayableID)
+    }
+}
+
+enum PlayerErrorRecoveryAction: Sendable, Equatable {
+    case showCurrentStreamingPlaylist
+    case dismiss
+    case chooseLocalFile
+
+    var buttonTitle: String {
+        switch self {
+        case .showCurrentStreamingPlaylist:
+            return "목록 보기"
+        case .dismiss:
+            return "닫기"
+        case .chooseLocalFile:
+            return "다른 파일 선택"
         }
-        return expectedQueueEntryID == actualQueueEntryID
+    }
+}
+
+struct PlayerErrorRecoveryPolicy: Sendable, Equatable {
+    static func action(
+        hasStreamingSong: Bool,
+        hasCurrentStreamingPlaylist: Bool
+    ) -> PlayerErrorRecoveryAction {
+        if hasCurrentStreamingPlaylist {
+            return .showCurrentStreamingPlaylist
+        }
+        return hasStreamingSong ? .dismiss : .chooseLocalFile
     }
 }
 
