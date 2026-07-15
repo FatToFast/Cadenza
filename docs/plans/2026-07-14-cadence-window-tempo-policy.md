@@ -649,7 +649,7 @@ git commit -m "feat: persist metronome preferences"
 
 ## Task 9: BPM 분석 실패의 수동 재시도 경로
 
-외부 API와 프리뷰의 자동 교차검증은 별도 설계가 필요한 후속 범위다. 이번 계획에서는 검토에서 확인된 “세션 동안 재시도 불가”만 안전하게 해소한다.
+외부 API와 프리뷰의 자동 상시 교차검증은 별도 설계가 필요한 후속 범위다. 이번 계획에서는 “세션 동안 재시도 불가”를 해소하고, 사용자가 명시적으로 재시도할 때 외부 조회와 캐시를 우회한 프리뷰 분석을 모두 새로 실행한다.
 
 **Files:**
 - Modify: `Cadenza/Services/AppleMusicStreamingController.swift:111-120, 756-835`
@@ -687,7 +687,8 @@ Expected: retry policy가 없어 compile failure.
 **Step 3: 최소 retry 구현**
 
 - `failedPreviewAnalysisKeys` Set을 명시적 `PreviewAnalysisRetryPolicy`로 교체한다.
-- controller에 `retryCurrentBPMAnalysis()`를 추가해 현재 identity의 실패와 GetSongBPM attempted 상태를 초기화하고 preview 분석을 다시 시작한다.
+- controller에 `retryCurrentBPMAnalysis()`를 추가해 현재 identity의 실패와 GetSongBPM attempted 상태를 초기화하고 preview 분석 캐시를 우회해 다시 시작한다.
+- 수동 재시도에서는 새 외부 BPM이 있어도 프리뷰 분석을 수행하며, 프리뷰 성공값을 우선하고 실패 시 외부/기존 값으로 폴백한다.
 - 박자 상태가 `.needsConfirmation` 또는 `.bpmOnly`일 때 `다시 분석` 버튼을 노출한다.
 - 수동 BPM override는 재시도보다 계속 우선한다.
 - 프로덕션 경로의 관련 `print`는 같은 로깅 문장이 이미 있을 때 제거한다.
