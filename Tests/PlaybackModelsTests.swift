@@ -291,6 +291,15 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(plan.mode, .adjustedSpeed)
     }
 
+    func testTempoPlanAcceleratesEightySevenBPMToNinetyBPM() {
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 87)
+
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(plan.musicalTarget, 90, accuracy: 0.0001)
+        XCTAssertEqual(plan.playbackRate, 90.0 / 87.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 180, accuracy: 0.0001)
+    }
+
     func testTempoPlanAcceleratesNinetySixBPMToNextHigherFold() {
         let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 96)
 
@@ -516,6 +525,69 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(subdivided[3], 1.0, accuracy: 0.0001)
         XCTAssertEqual(subdivided[4], 4.0 / 3.0, accuracy: 0.0001)
         XCTAssertEqual(subdivided[8], 8.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testBeatGridCadenceInterpolatorPreservesUnitAndDoubleTimePulses() {
+        let sourceBeatTimes = [0.0, 1.0, 2.0]
+
+        XCTAssertEqual(
+            BeatGridCadenceInterpolator.multiplier(
+                effectiveCadence: 90,
+                musicalTargetBPM: 90
+            ),
+            1
+        )
+        XCTAssertEqual(
+            BeatGridCadenceInterpolator.subdivide(
+                beatTimesSeconds: sourceBeatTimes,
+                multiplier: 1
+            ),
+            sourceBeatTimes
+        )
+
+        XCTAssertEqual(
+            BeatGridCadenceInterpolator.multiplier(
+                effectiveCadence: 180,
+                musicalTargetBPM: 90
+            ),
+            2
+        )
+        XCTAssertEqual(
+            BeatGridCadenceInterpolator.subdivide(
+                beatTimesSeconds: sourceBeatTimes,
+                multiplier: 2
+            ),
+            [0, 0.5, 1, 1.5, 2]
+        )
+    }
+
+    func testBeatGridCadenceInterpolatorDownsamplesNativeHalfTimePulse() {
+        let sourceBeatDuration = 60.0 / 280.0
+        let sourceBeatTimes = (0...4).map { Double($0) * sourceBeatDuration }
+        let multiplier = BeatGridCadenceInterpolator.multiplier(
+            effectiveCadence: 140,
+            musicalTargetBPM: 280
+        )
+        let downsampled = BeatGridCadenceInterpolator.subdivide(
+            beatTimesSeconds: sourceBeatTimes,
+            multiplier: multiplier
+        )
+
+        XCTAssertEqual(Double(multiplier), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(downsampled.count, 3)
+        XCTAssertEqual(downsampled[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(downsampled[1], 60.0 / 140.0, accuracy: 0.0001)
+        XCTAssertEqual(downsampled[2], 120.0 / 140.0, accuracy: 0.0001)
+        XCTAssertEqual(
+            BeatGridSyncPlanner.intervalAfterBeat(
+                at: 0,
+                beatTimesSeconds: downsampled,
+                originalBPM: 140,
+                targetBPM: 140
+            ),
+            60.0 / 140.0,
+            accuracy: 0.0001
+        )
     }
 
     func testCadenceVisualizationDescribesEffectiveCadenceInSPM() {

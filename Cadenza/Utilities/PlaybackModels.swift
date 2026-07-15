@@ -268,12 +268,12 @@ enum BeatGridSyncPlanner {
 }
 
 enum BeatGridCadenceInterpolator {
-    private static let supportedMultipliers = [1, 2, 4]
+    private static let supportedMultipliers = [0.5, 1.0, 2.0, 4.0]
 
     static func multiplier(
         effectiveCadence: Double,
         musicalTargetBPM: Double
-    ) -> Int {
+    ) -> Double {
         guard effectiveCadence.isFinite,
               musicalTargetBPM.isFinite,
               effectiveCadence > 0,
@@ -287,14 +287,28 @@ enum BeatGridCadenceInterpolator {
 
     static func subdivide(
         beatTimesSeconds: [TimeInterval],
-        multiplier: Int
+        multiplier: Double
     ) -> [TimeInterval] {
-        guard multiplier > 1, beatTimesSeconds.count >= 2 else {
+        guard supportedMultipliers.contains(multiplier) else {
+            return beatTimesSeconds
+        }
+
+        if multiplier == 0.5 {
+            guard beatTimesSeconds.count >= 3 else { return [] }
+            return stride(from: 0, to: beatTimesSeconds.count, by: 2).map {
+                beatTimesSeconds[$0]
+            }
+        }
+
+        let subdivisionCount = Int(multiplier.rounded())
+        guard subdivisionCount > 1,
+              abs(Double(subdivisionCount) - multiplier) < 0.0001,
+              beatTimesSeconds.count >= 2 else {
             return beatTimesSeconds
         }
 
         var result: [TimeInterval] = []
-        result.reserveCapacity((beatTimesSeconds.count - 1) * multiplier + 1)
+        result.reserveCapacity((beatTimesSeconds.count - 1) * subdivisionCount + 1)
 
         for index in beatTimesSeconds.indices.dropLast() {
             let start = beatTimesSeconds[index]
@@ -305,8 +319,8 @@ enum BeatGridCadenceInterpolator {
                   interval > 0 else { return beatTimesSeconds }
 
             result.append(start)
-            for subdivision in 1..<multiplier {
-                result.append(start + interval * Double(subdivision) / Double(multiplier))
+            for subdivision in 1..<subdivisionCount {
+                result.append(start + interval * Double(subdivision) / Double(subdivisionCount))
             }
         }
         if let last = beatTimesSeconds.last {
