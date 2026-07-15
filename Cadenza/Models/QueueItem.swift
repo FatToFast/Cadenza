@@ -282,6 +282,58 @@ struct StreamingTempoPolicyGate: Sendable, Equatable {
     static func shouldEvaluate(hasSong: Bool, isLoading: Bool) -> Bool {
         hasSong && !isLoading
     }
+
+    static func shouldAutoSkipRejectedPlaylistEntry(
+        origin: StreamingEntryOrigin
+    ) -> Bool {
+        origin == .queueAdvance
+    }
+}
+
+enum StreamingEntryOrigin: Sendable, Equatable {
+    case explicitSelection
+    case queueAdvance
+
+    static func resolved(
+        requestedIndex: Int?,
+        previousIndex: Int?,
+        observedIndex: Int
+    ) -> Self {
+        if let requestedIndex {
+            return requestedIndex == observedIndex ? .explicitSelection : .queueAdvance
+        }
+        if let previousIndex, previousIndex != observedIndex {
+            return .queueAdvance
+        }
+        return .queueAdvance
+    }
+}
+
+struct StreamingPlaylistSelectionPlan: Sendable, Equatable {
+    let selectedEntryID: String
+    let selectedIndex: Int
+
+    static func make(entryIDs: [String], selectedEntryID: String) -> Self? {
+        guard let selectedIndex = entryIDs.firstIndex(of: selectedEntryID) else {
+            return nil
+        }
+        return Self(
+            selectedEntryID: selectedEntryID,
+            selectedIndex: selectedIndex
+        )
+    }
+}
+
+struct StreamingQueueStartVerifier: Sendable, Equatable {
+    static func matches(
+        expectedQueueEntryID: String?,
+        actualQueueEntryID: String?
+    ) -> Bool {
+        guard let expectedQueueEntryID, let actualQueueEntryID else {
+            return false
+        }
+        return expectedQueueEntryID == actualQueueEntryID
+    }
 }
 
 struct StreamingQueueCommandSnapshot: Sendable, Equatable {

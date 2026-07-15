@@ -276,6 +276,100 @@ final class QueueItemTests: XCTestCase {
         )
     }
 
+    func testStreamingPlaylistSelectionPlanPreservesRequestedTailIndexes() {
+        let ids = (0..<10).map { "entry-\($0)" }
+
+        XCTAssertEqual(
+            StreamingPlaylistSelectionPlan.make(
+                entryIDs: ids,
+                selectedEntryID: "entry-5"
+            )?.selectedIndex,
+            5
+        )
+        XCTAssertEqual(
+            StreamingPlaylistSelectionPlan.make(
+                entryIDs: ids,
+                selectedEntryID: "entry-6"
+            )?.selectedIndex,
+            6
+        )
+        XCTAssertEqual(
+            StreamingPlaylistSelectionPlan.make(
+                entryIDs: ids,
+                selectedEntryID: "entry-7"
+            )?.selectedIndex,
+            7
+        )
+    }
+
+    func testStreamingPlaylistSelectionPlanRejectsMissingEntry() {
+        XCTAssertNil(
+            StreamingPlaylistSelectionPlan.make(
+                entryIDs: ["entry-a", "entry-b"],
+                selectedEntryID: "entry-c"
+            )
+        )
+    }
+
+    func testStreamingQueueStartVerifierRequiresExactQueueEntry() {
+        XCTAssertTrue(
+            StreamingQueueStartVerifier.matches(
+                expectedQueueEntryID: "queue-4",
+                actualQueueEntryID: "queue-4"
+            )
+        )
+        XCTAssertFalse(
+            StreamingQueueStartVerifier.matches(
+                expectedQueueEntryID: "queue-4",
+                actualQueueEntryID: "queue-8"
+            )
+        )
+        XCTAssertFalse(
+            StreamingQueueStartVerifier.matches(
+                expectedQueueEntryID: "queue-4",
+                actualQueueEntryID: nil
+            )
+        )
+    }
+
+    func testExplicitStreamingSelectionDoesNotAutoSkipRejectedTrack() {
+        XCTAssertFalse(
+            StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(
+                origin: .explicitSelection
+            )
+        )
+    }
+
+    func testQueueAdvanceStillAutoSkipsRejectedTrack() {
+        XCTAssertTrue(
+            StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(
+                origin: .queueAdvance
+            )
+        )
+    }
+
+    func testStreamingEntryOriginStaysExplicitForRequestedIndex() {
+        XCTAssertEqual(
+            StreamingEntryOrigin.resolved(
+                requestedIndex: 6,
+                previousIndex: 6,
+                observedIndex: 6
+            ),
+            .explicitSelection
+        )
+    }
+
+    func testStreamingEntryOriginBecomesQueueAdvanceWhenObservedIndexChanges() {
+        XCTAssertEqual(
+            StreamingEntryOrigin.resolved(
+                requestedIndex: nil,
+                previousIndex: 6,
+                observedIndex: 7
+            ),
+            .queueAdvance
+        )
+    }
+
     func testStreamingQueueCommandSnapshotRejectsSelectionGenerationChange() {
         let snapshot = StreamingQueueCommandSnapshot(
             selectionGeneration: 7,
