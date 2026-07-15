@@ -169,18 +169,18 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertTrue(audio.isCurrentTempoPlayable)
     }
 
-    func testConfirmedNinetySixBPMRejectsUnsafePlaybackRate() {
+    func testConfirmedOneTwentyBPMRejectsUnsafePlaybackRate() {
         let audio = AudioManager()
         audio.targetBPM = 180
 
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
 
         XCTAssertFalse(audio.tempoPlan.isPlayable)
-        XCTAssertGreaterThan(audio.tempoPlan.requiredPlaybackRate, 1.25)
+        XCTAssertLessThan(audio.tempoPlan.requiredPlaybackRate, BPMRange.minimumQualityRate)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
         XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
         XCTAssertEqual(audio.tempoRejectionMessage, "케이던스 범위에 맞지 않는 곡입니다")
@@ -207,7 +207,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         audio.targetBPM = 180
 
         XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
-        XCTAssertGreaterThan(audio.tempoPlan.requiredPlaybackRate, 1.25)
+        XCTAssertLessThan(audio.tempoPlan.requiredPlaybackRate, BPMRange.minimumQualityRate)
         XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
         XCTAssertFalse(audio.isCurrentTempoPlayable)
         XCTAssertNil(audio.tempoRejectionMessage)
@@ -219,7 +219,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         audio.metronomeEnabled = true
 
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
@@ -261,7 +261,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         audio.play()
         XCTAssertEqual(audio.state, .playing)
 
-        audio.setOriginalBPM(96)
+        audio.setOriginalBPM(120)
         await Task.yield()
         await Task.yield()
 
@@ -310,7 +310,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
@@ -336,7 +336,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
@@ -389,7 +389,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
@@ -421,7 +421,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )
@@ -445,7 +445,7 @@ final class AudioManagerGenerationTests: XCTestCase {
         let audio = AudioManager()
         audio.targetBPM = 180
         audio.setStreamingBeatAlignment(
-            bpm: 96,
+            bpm: 120,
             source: .metadata,
             beatOffsetSeconds: nil
         )

@@ -9,6 +9,7 @@ enum BPMRange {
     static let targetDefault: Double = 180
     static let cadenceAllowance: Double = 10
     static let maximumQualityRate: Double = 1.25
+    static var minimumQualityRate: Double { 1.0 / maximumQualityRate }
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
@@ -68,17 +69,19 @@ enum BPMRange {
             )
         }
 
-        let musicalTarget = foldedMusicalTarget(
-            targetCadence: base,
-            originalBPM: originalBPM
+        let adjustment = closestWindowAdjustment(
+            originalBPM: originalBPM,
+            allowedCadence: allowed
         )
-        let requiredPlaybackRate = musicalTarget / originalBPM
+        let musicalTarget = adjustment.musicalTarget
+        let requiredPlaybackRate = adjustment.playbackRate
 
-        guard requiredPlaybackRate >= 1.0 else {
+        guard requiredPlaybackRate >= minimumQualityRate else {
             return rejectedPlan(
                 base: base,
                 allowed: allowed,
                 musicalTarget: musicalTarget,
+                effectiveCadence: adjustment.effectiveCadence,
                 requiredPlaybackRate: requiredPlaybackRate,
                 reason: .slowingRequired
             )
@@ -88,6 +91,7 @@ enum BPMRange {
                 base: base,
                 allowed: allowed,
                 musicalTarget: musicalTarget,
+                effectiveCadence: adjustment.effectiveCadence,
                 requiredPlaybackRate: requiredPlaybackRate,
                 reason: .rateAboveMaximum
             )
@@ -97,11 +101,40 @@ enum BPMRange {
             baseCadence: base,
             allowedCadence: allowed,
             musicalTarget: musicalTarget,
-            effectiveCadence: base,
+            effectiveCadence: adjustment.effectiveCadence,
             requiredPlaybackRate: requiredPlaybackRate,
             mode: .adjustedSpeed,
             rejectionReason: nil
         )
+    }
+
+    private struct WindowAdjustment {
+        let musicalTarget: Double
+        let effectiveCadence: Double
+        let playbackRate: Double
+    }
+
+    private static func closestWindowAdjustment(
+        originalBPM: Double,
+        allowedCadence: ClosedRange<Double>
+    ) -> WindowAdjustment {
+        [1.0, 2.0, 4.0]
+            .map { cadenceMultiplier in
+                let nativeCadence = originalBPM * cadenceMultiplier
+                let effectiveCadence = min(
+                    max(nativeCadence, allowedCadence.lowerBound),
+                    allowedCadence.upperBound
+                )
+                let playbackRate = effectiveCadence / nativeCadence
+                return WindowAdjustment(
+                    musicalTarget: effectiveCadence / cadenceMultiplier,
+                    effectiveCadence: effectiveCadence,
+                    playbackRate: playbackRate
+                )
+            }
+            .min { lhs, rhs in
+                abs(log2(lhs.playbackRate)) < abs(log2(rhs.playbackRate))
+            }!
     }
 
     /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 배속이 1.0 이상이면서 가장 1.0에
@@ -144,6 +177,7 @@ enum BPMRange {
         base: Double,
         allowed: ClosedRange<Double>,
         musicalTarget: Double,
+        effectiveCadence: Double? = nil,
         requiredPlaybackRate: Double,
         reason: TempoRejectionReason
     ) -> TempoPlan {
@@ -151,7 +185,7 @@ enum BPMRange {
             baseCadence: base,
             allowedCadence: allowed,
             musicalTarget: musicalTarget,
-            effectiveCadence: base,
+            effectiveCadence: effectiveCadence ?? base,
             requiredPlaybackRate: requiredPlaybackRate,
             mode: .rejected,
             rejectionReason: reason

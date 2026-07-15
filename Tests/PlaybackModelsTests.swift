@@ -279,13 +279,37 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(plan.mode, .adjustedSpeed)
     }
 
-    func testTempoPlanRejectsRateAboveQualityLimit() {
+    func testTempoPlanAdjustsDownToUpperCadenceBoundary() {
         let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 96)
+
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(plan.mode, .adjustedSpeed)
+        XCTAssertNil(plan.rejectionReason)
+        XCTAssertEqual(plan.musicalTarget, 95, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 190, accuracy: 0.0001)
+        XCTAssertEqual(plan.requiredPlaybackRate, 95.0 / 96.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.playbackRate, 95.0 / 96.0, accuracy: 0.0001)
+    }
+
+    func testTempoPlanStillRejectsAccelerationAboveQualityLimit() {
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 70)
 
         XCTAssertFalse(plan.isPlayable)
         XCTAssertEqual(plan.mode, .rejected)
         XCTAssertEqual(plan.rejectionReason, .rateAboveMaximum)
         XCTAssertGreaterThan(plan.requiredPlaybackRate, 1.25)
+        XCTAssertEqual(plan.playbackRate, 1.0, accuracy: 0.0001)
+    }
+
+    func testTempoPlanStillRejectsSlowdownBelowQualityLimit() {
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 120)
+
+        XCTAssertFalse(plan.isPlayable)
+        XCTAssertEqual(plan.mode, .rejected)
+        XCTAssertEqual(plan.rejectionReason, .slowingRequired)
+        XCTAssertEqual(plan.musicalTarget, 95, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 190, accuracy: 0.0001)
+        XCTAssertLessThan(plan.requiredPlaybackRate, 0.8)
         XCTAssertEqual(plan.playbackRate, 1.0, accuracy: 0.0001)
     }
 
@@ -553,7 +577,7 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.nativeFootCadence, plan.effectiveCadence, accuracy: 0.0001)
         XCTAssertEqual(fit.status, .unsuitable)
         XCTAssertEqual(fit.isRecommended, plan.isPlayable)
-        XCTAssertEqual(fit.detailText, "120 BPM · 180 SPM · 필요 150%")
+        XCTAssertEqual(fit.detailText, "120 BPM · 190 SPM · 필요 79%")
     }
 
     func testRunningCadenceFitReportsAdjustedTempoPlanRateAndCadence() {
@@ -568,15 +592,16 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertEqual(fit.detailText, "80 BPM · 180 SPM · 113%")
     }
 
-    func testRunningCadenceFitDoesNotPresentRejectedRateAsPlayable() {
+    func testRunningCadenceFitPresentsSmallUpperBoundaryAdjustmentAsPlayable() {
         let fit = RunningCadenceFit.evaluate(originalBPM: 96, targetCadence: 180)
         let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 96)
 
-        XCTAssertFalse(plan.isPlayable)
+        XCTAssertTrue(plan.isPlayable)
         XCTAssertEqual(fit.playbackRate, plan.requiredPlaybackRate, accuracy: 0.0001)
-        XCTAssertEqual(fit.status, .unsuitable)
-        XCTAssertFalse(fit.isRecommended)
-        XCTAssertTrue(fit.detailText.contains("필요"))
+        XCTAssertEqual(fit.nativeFootCadence, 190, accuracy: 0.0001)
+        XCTAssertEqual(fit.status, .excellent)
+        XCTAssertTrue(fit.isRecommended)
+        XCTAssertEqual(fit.detailText, "96 BPM · 190 SPM · 99%")
     }
 
     func testRunningCadenceFitMarksRejectedInvalidBPMAsUnsuitable() {
