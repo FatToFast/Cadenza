@@ -167,6 +167,75 @@ final class StreamingBPMResolverTests: XCTestCase {
         XCTAssertFalse(resolution.didAttemptGetSongBPM)
     }
 
+    func testRejectsUnsupportedCachedBPMAsMissingConfirmation() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: { nil }
+        )
+
+        for bpm in [29.0, 301.0, .nan, .infinity] {
+            let resolution = await resolver.resolve(
+                cachedResult: StreamingBPMResult(
+                    bpm: bpm,
+                    source: .metadata,
+                    beatOffsetSeconds: nil,
+                    beatTimesSeconds: nil,
+                    confidence: nil,
+                    beatSyncStatus: .bpmOnly,
+                    beatSyncIssue: .missingBeatGrid
+                ),
+                shouldTryGetSongBPM: false,
+                shouldTryPreviewAnalysis: false,
+                title: "Invalid",
+                artist: "Artist",
+                appleMusicID: nil
+            )
+            let assessment = BeatSyncReliability.assess(
+                originalBPM: resolution.result?.bpm,
+                confidence: resolution.result?.confidence,
+                beatTimesSeconds: resolution.result?.beatTimesSeconds ?? []
+            )
+
+            XCTAssertNil(resolution.result, "BPM: \(bpm)")
+            XCTAssertEqual(assessment.status, .needsConfirmation, "BPM: \(bpm)")
+            XCTAssertEqual(assessment.issue, .missingBPM, "BPM: \(bpm)")
+        }
+    }
+
+    func testKeepsValidHighAccelerationCachedBPMPlayable() async {
+        let resolver = StreamingBPMResolver(
+            getSongBPM: { _, _, _, _ in nil },
+            previewAnalysis: { nil }
+        )
+
+        let resolution = await resolver.resolve(
+            cachedResult: StreamingBPMResult(
+                bpm: 120,
+                source: .metadata,
+                beatOffsetSeconds: nil,
+                beatTimesSeconds: nil,
+                confidence: nil,
+                beatSyncStatus: .bpmOnly,
+                beatSyncIssue: .missingBeatGrid
+            ),
+            shouldTryGetSongBPM: false,
+            shouldTryPreviewAnalysis: false,
+            title: "Valid",
+            artist: "Artist",
+            appleMusicID: nil
+        )
+        let plan = BPMRange.tempoPlan(
+            targetCadence: 180,
+            originalBPM: resolution.result?.bpm ?? 0
+        )
+
+        XCTAssertEqual(resolution.result?.bpm, 120)
+        XCTAssertEqual(resolution.result?.source, .metadata)
+        XCTAssertEqual(resolution.result?.beatSyncStatus, .bpmOnly)
+        XCTAssertTrue(plan.isPlayable)
+        XCTAssertEqual(plan.playbackRate, 1.5, accuracy: 0.0001)
+    }
+
     func testFallsBackToPreviewAnalysisWhenGetSongBPMHasNoMatch() async {
         let previewCounter = PreviewCallCounter()
         let resolver = StreamingBPMResolver(

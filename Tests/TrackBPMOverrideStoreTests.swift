@@ -2,6 +2,11 @@ import XCTest
 @testable import Cadenza
 
 final class TrackBPMOverrideStoreTests: XCTestCase {
+    private struct PersistedOverride: Codable {
+        let bpm: Double
+        let storedAt: Date
+    }
+
     private var defaults: UserDefaults!
     private let suiteName = "test.cadenza.track-override"
 
@@ -38,15 +43,42 @@ final class TrackBPMOverrideStoreTests: XCTestCase {
         XCTAssertEqual(other.bpm(forIdentity: key), 168)
     }
 
-    func testStoreRejectsInvalidBPM() {
+    func testStoreRejectsUnsupportedAndNonfiniteBPM() {
         let store = makeStore()
-        let key = TrackBPMOverrideStore.identityKey(.appleMusic(songID: "abc"))
 
-        store.store(bpm: 0, forIdentity: key)
-        store.store(bpm: -10, forIdentity: key)
-        store.store(bpm: .nan, forIdentity: key)
+        for (index, bpm) in [0.0, -10.0, 29.0, 301.0, .nan, .infinity].enumerated() {
+            let key = "invalid-\(index)"
+            store.store(bpm: bpm, forIdentity: key)
+            XCTAssertNil(store.bpm(forIdentity: key), "BPM: \(bpm)")
+        }
+    }
 
-        XCTAssertNil(store.bpm(forIdentity: key))
+    func testStoreAcceptsSupportedBPMBoundaries() {
+        let store = makeStore()
+
+        store.store(bpm: 30, forIdentity: "minimum")
+        store.store(bpm: 300, forIdentity: "maximum")
+
+        XCTAssertEqual(store.bpm(forIdentity: "minimum"), 30)
+        XCTAssertEqual(store.bpm(forIdentity: "maximum"), 300)
+    }
+
+    func testReadRejectsPersistedUnsupportedBPM() throws {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+
+        for bpm in [29.0, 301.0, .nan, .infinity] {
+            let data = try encoder.encode([
+                "legacy": PersistedOverride(bpm: bpm, storedAt: Date()),
+            ])
+            defaults.set(data, forKey: "override.test")
+
+            XCTAssertNil(makeStore().bpm(forIdentity: "legacy"), "BPM: \(bpm)")
+        }
     }
 
     func testStoreRejectsEmptyIdentity() {

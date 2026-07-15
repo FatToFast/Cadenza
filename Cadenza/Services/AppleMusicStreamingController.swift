@@ -13,6 +13,10 @@ struct StreamingBPMResult: Equatable, Sendable {
     let confidence: Double?
     let beatSyncStatus: BeatSyncStatus
     let beatSyncIssue: BeatSyncReliabilityIssue?
+
+    var validated: StreamingBPMResult? {
+        BPMRange.validatedOriginalBPM(bpm).map { _ in self }
+    }
 }
 
 struct StreamingBPMResolution: Equatable, Sendable {
@@ -71,7 +75,7 @@ struct StreamingBPMResolver: Sendable {
                 confidence: nil,
                 beatSyncStatus: .bpmOnly,
                 beatSyncIssue: .missingBeatGrid
-            )
+            ).validated
         }
 
         if !forcePreviewAnalysis, let externalResult {
@@ -84,8 +88,15 @@ struct StreamingBPMResolver: Sendable {
         if forcePreviewAnalysis,
            shouldTryPreviewAnalysis,
            let analysis = await previewAnalysis() {
+            if let previewResult = result(for: analysis).validated {
+                return StreamingBPMResolution(
+                    result: previewResult,
+                    didAttemptGetSongBPM: shouldTryGetSongBPM
+                )
+            }
+
             return StreamingBPMResolution(
-                result: result(for: analysis),
+                result: externalResult ?? cachedResult?.validated,
                 didAttemptGetSongBPM: shouldTryGetSongBPM
             )
         }
@@ -97,7 +108,7 @@ struct StreamingBPMResolver: Sendable {
             )
         }
 
-        if let cachedResult {
+        if let cachedResult = cachedResult?.validated {
             return StreamingBPMResolution(
                 result: cachedResult,
                 didAttemptGetSongBPM: shouldTryGetSongBPM
@@ -113,7 +124,7 @@ struct StreamingBPMResolver: Sendable {
         }
 
         return StreamingBPMResolution(
-            result: result(for: analysis),
+            result: result(for: analysis).validated,
             didAttemptGetSongBPM: shouldTryGetSongBPM
         )
     }
@@ -145,19 +156,19 @@ struct StreamingQueuePolicyContext: Sendable, Equatable {
     static func song(identity: String?) -> StreamingQueuePolicyContext {
         StreamingQueuePolicyContext(
             isPlaylist: false,
-            identity: TempoSkipGuard.normalizedIdentity(identity)
+            identity: QueueIdentityNormalizer.normalized(identity)
         )
     }
 
     static func playlist(identity: String?) -> StreamingQueuePolicyContext {
         StreamingQueuePolicyContext(
             isPlaylist: true,
-            identity: TempoSkipGuard.normalizedIdentity(identity)
+            identity: QueueIdentityNormalizer.normalized(identity)
         )
     }
 
     mutating func replaceIdentity(_ identity: String?) {
-        self.identity = TempoSkipGuard.normalizedIdentity(identity)
+        self.identity = QueueIdentityNormalizer.normalized(identity)
     }
 
     mutating func clearAfterFailure() {
@@ -1049,12 +1060,20 @@ final class AppleMusicStreamingController: ObservableObject {
     ) -> StreamingBPMResult? {
         guard didBuildBPMCache else { return nil }
 
-        if let songID, let bpm = bpmCacheByKey[storeKey(songID)] {
+        if let songID,
+           let bpm = bpmCacheByKey[storeKey(songID)]?.validated {
             return bpm
         }
 
-        return bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: albumTitle)]
-            ?? bpmCacheByKey[metadataKey(title: title, artist: artist, albumTitle: nil)]
+        if let bpm = bpmCacheByKey[
+            metadataKey(title: title, artist: artist, albumTitle: albumTitle)
+        ]?.validated {
+            return bpm
+        }
+
+        return bpmCacheByKey[
+            metadataKey(title: title, artist: artist, albumTitle: nil)
+        ]?.validated
     }
 
     private func prepareBPMCacheIfPossible() async {
@@ -1080,8 +1099,9 @@ final class AppleMusicStreamingController: ObservableObject {
         var cache: [String: StreamingBPMResult] = [:]
         let items = MPMediaQuery.songs().items ?? []
         for item in items {
-            let bpm = Double(item.beatsPerMinute)
-            guard bpm > 0 else { continue }
+            guard let bpm = BPMRange.validatedOriginalBPM(Double(item.beatsPerMinute)) else {
+                continue
+            }
             let result = StreamingBPMResult(
                 bpm: bpm,
                 source: .metadata,
@@ -1119,13 +1139,14 @@ final class AppleMusicStreamingController: ObservableObject {
             return
         }
 
-        currentBPMSource = result?.source
-        currentBPM = result?.bpm
-        currentBeatOffsetSeconds = result?.beatOffsetSeconds
-        currentBeatTimesSeconds = result?.beatTimesSeconds ?? []
-        currentBeatAlignmentConfidence = result?.confidence
-        currentBeatSyncStatus = result?.beatSyncStatus ?? .needsConfirmation
-        currentBeatSyncIssue = result?.beatSyncIssue ?? .missingBPM
+        let validatedResult = result?.validated
+        currentBPMSource = validatedResult?.source
+        currentBPM = validatedResult?.bpm
+        currentBeatOffsetSeconds = validatedResult?.beatOffsetSeconds
+        currentBeatTimesSeconds = validatedResult?.beatTimesSeconds ?? []
+        currentBeatAlignmentConfidence = validatedResult?.confidence
+        currentBeatSyncStatus = validatedResult?.beatSyncStatus ?? .needsConfirmation
+        currentBeatSyncIssue = validatedResult?.beatSyncIssue ?? .missingBPM
     }
 
     private func currentTrackOverrideBPM() -> Double? {
@@ -1292,7 +1313,7 @@ final class AppleMusicStreamingController: ObservableObject {
             artist: artist,
             albumTitle: albumTitle
         )
-        let cachedResult = bpmCacheByKey[identityKey]
+        let cachedResult = bpmCacheByKey[identityKey]?.validated
         let shouldTryGetSongBPM = !getSongBPMAttemptedKeys.contains(identityKey)
         let shouldTryPreviewAnalysis = forcePreviewAnalysis
             || (cachedResult == nil && previewAnalysisRetryPolicy.shouldAttempt(identity: identityKey))
@@ -1348,11 +1369,13 @@ final class AppleMusicStreamingController: ObservableObject {
                 return
             }
 
-            if let songID {
-                self.bpmCacheByKey[self.storeKey(songID)] = result
-            }
-            self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: albumTitle)] = result
-            self.bpmCacheByKey[self.metadataKey(title: title, artist: artist, albumTitle: nil)] = result
+            self.cacheBPMResult(
+                result,
+                songID: songID,
+                title: title,
+                artist: artist,
+                albumTitle: albumTitle
+            )
             await GetSongBPMService.shared.recordBPM(
                 result.bpm,
                 title: title,
@@ -1385,6 +1408,7 @@ final class AppleMusicStreamingController: ObservableObject {
         artist: String?,
         albumTitle: String?
     ) {
+        guard let result = result.validated else { return }
         if let songID {
             bpmCacheByKey[storeKey(songID)] = result
         }

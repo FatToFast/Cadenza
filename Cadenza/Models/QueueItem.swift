@@ -171,93 +171,17 @@ struct LocalFilePlaylist: Sendable, Equatable {
     }
 }
 
-struct TempoSkipGuard: Sendable, Equatable {
-    private var visitedIdentities: Set<String> = []
-
-    static func normalizedIdentity(_ identity: String?) -> String? {
+enum QueueIdentityNormalizer {
+    static func normalized(_ identity: String?) -> String? {
         guard let identity else { return nil }
         let normalized = identity.trimmingCharacters(in: .whitespacesAndNewlines)
         return normalized.isEmpty ? nil : normalized
-    }
-
-    mutating func register(identity: String?) -> Bool {
-        guard let normalized = Self.normalizedIdentity(identity) else { return false }
-        return visitedIdentities.insert(normalized).inserted
-    }
-
-    mutating func reset() {
-        visitedIdentities.removeAll(keepingCapacity: true)
-    }
-}
-
-struct StreamingTempoSkipToken: Sendable, Equatable {
-    let identity: String
-    let generation: Int
-}
-
-enum StreamingTempoSkipTransition: Sendable, Equatable {
-    case exhausted
-    case waiting
-    case skip(StreamingTempoSkipToken)
-}
-
-struct StreamingTempoSkipCoordinator: Sendable, Equatable {
-    private var skipGuard = TempoSkipGuard()
-    private(set) var inFlightIdentity: String?
-    private(set) var generation = 0
-
-    mutating func transitionForRejected(identity: String?) -> StreamingTempoSkipTransition {
-        guard let identity = TempoSkipGuard.normalizedIdentity(identity) else {
-            return .exhausted
-        }
-        if inFlightIdentity == identity {
-            return .waiting
-        }
-
-        inFlightIdentity = nil
-        guard skipGuard.register(identity: identity) else {
-            return .exhausted
-        }
-
-        inFlightIdentity = identity
-        return .skip(StreamingTempoSkipToken(identity: identity, generation: generation))
-    }
-
-    func permitsSkip(token: StreamingTempoSkipToken, currentIdentity: String?) -> Bool {
-        owns(token: token)
-            && TempoSkipGuard.normalizedIdentity(currentIdentity) == token.identity
-    }
-
-    func owns(token: StreamingTempoSkipToken) -> Bool {
-        generation == token.generation && inFlightIdentity == token.identity
-    }
-
-    mutating func clearInFlight(ifMatching identity: String) {
-        guard inFlightIdentity == identity else { return }
-        inFlightIdentity = nil
-    }
-
-    mutating func reset() {
-        skipGuard.reset()
-        inFlightIdentity = nil
-        generation &+= 1
-    }
-
-    mutating func invalidate() {
-        inFlightIdentity = nil
-        generation &+= 1
     }
 }
 
 struct StreamingTempoPolicyGate: Sendable, Equatable {
     static func shouldEvaluate(hasSong: Bool, isLoading: Bool) -> Bool {
         hasSong && !isLoading
-    }
-
-    static func shouldAutoSkipRejectedPlaylistEntry(
-        origin: StreamingEntryOrigin
-    ) -> Bool {
-        origin == .queueAdvance
     }
 }
 
@@ -345,13 +269,13 @@ struct StreamingQueueCommandSnapshot: Sendable, Equatable {
 
     init(selectionGeneration: Int, expectedIdentity: String?) {
         self.selectionGeneration = selectionGeneration
-        self.expectedIdentity = TempoSkipGuard.normalizedIdentity(expectedIdentity)
+        self.expectedIdentity = QueueIdentityNormalizer.normalized(expectedIdentity)
     }
 
     func isCurrent(selectionGeneration: Int, currentIdentity: String?) -> Bool {
         guard self.selectionGeneration == selectionGeneration else { return false }
         guard let expectedIdentity else { return true }
-        return TempoSkipGuard.normalizedIdentity(currentIdentity) == expectedIdentity
+        return QueueIdentityNormalizer.normalized(currentIdentity) == expectedIdentity
     }
 }
 

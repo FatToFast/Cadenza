@@ -85,10 +85,7 @@ struct BPMDisplayView: View {
             }
             return "재생속도 \(rateText(tempoPlan.requiredPlaybackRate))배"
         case .rejected:
-            guard isValidRate(tempoPlan.requiredPlaybackRate) else {
-                return "범위에 맞지 않음 · 필요 배속 확인 불가"
-            }
-            return "범위에 맞지 않음 · 필요 \(rateText(tempoPlan.requiredPlaybackRate))배"
+            return "BPM 확인 필요"
         }
     }
 
@@ -102,7 +99,7 @@ struct BPMDisplayView: View {
 
         let original = "원곡 \(roundedText(originalBPM)) BPM, \(originalBPMSource.badgeText)"
         if tempoPlan.mode == .rejected {
-            return "재생 불가. \(baseAndRange). \(original). \(modeText)\(fit)"
+            return "BPM 확인 필요. \(baseAndRange). \(original)\(fit)"
         }
         return "실제 케이던스 \(roundedText(tempoPlan.effectiveCadence)) SPM. \(baseAndRange). \(original). \(modeText)\(fit)"
     }

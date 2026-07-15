@@ -193,55 +193,11 @@ final class QueueItemTests: XCTestCase {
         XCTAssertEqual(playlist.currentItem?.title, "a")
     }
 
-    func testTempoSkipGuardRejectsDuplicateIdentityUntilReset() {
-        var guardState = TempoSkipGuard()
-
-        XCTAssertTrue(guardState.register(identity: "song-a"))
-        XCTAssertFalse(guardState.register(identity: "song-a"))
-        XCTAssertTrue(guardState.register(identity: "song-b"))
-
-        guardState.reset()
-
-        XCTAssertTrue(guardState.register(identity: "song-a"))
-    }
-
-    func testTempoSkipGuardRejectsMissingOrBlankIdentity() {
-        var guardState = TempoSkipGuard()
-
-        XCTAssertFalse(guardState.register(identity: nil))
-        XCTAssertFalse(guardState.register(identity: ""))
-        XCTAssertFalse(guardState.register(identity: "   \n"))
-    }
-
-    func testStreamingTempoSkipCoordinatorTerminatesInvalidAndDuplicateIdentities() throws {
-        var coordinator = StreamingTempoSkipCoordinator()
-
-        XCTAssertEqual(coordinator.transitionForRejected(identity: nil), .exhausted)
-        XCTAssertEqual(coordinator.transitionForRejected(identity: "  \n"), .exhausted)
-
-        let first = coordinator.transitionForRejected(identity: " song-a ")
-        guard case .skip(let token) = first else {
-            return XCTFail("Expected first valid identity to request a skip")
-        }
-        XCTAssertEqual(token.identity, "song-a")
-        coordinator.clearInFlight(ifMatching: token.identity)
-
-        XCTAssertEqual(coordinator.transitionForRejected(identity: "song-a"), .exhausted)
-    }
-
-    func testStreamingTempoSkipCoordinatorBlocksStaleGenerationAndIdentity() throws {
-        var coordinator = StreamingTempoSkipCoordinator()
-        let transition = coordinator.transitionForRejected(identity: "song-a")
-        guard case .skip(let token) = transition else {
-            return XCTFail("Expected a skip token")
-        }
-
-        XCTAssertTrue(coordinator.permitsSkip(token: token, currentIdentity: "song-a"))
-        XCTAssertFalse(coordinator.permitsSkip(token: token, currentIdentity: "song-b"))
-
-        coordinator.reset()
-
-        XCTAssertFalse(coordinator.permitsSkip(token: token, currentIdentity: "song-a"))
+    func testQueueIdentityNormalizerTrimsAndRejectsBlankIdentity() {
+        XCTAssertEqual(QueueIdentityNormalizer.normalized(" song-a "), "song-a")
+        XCTAssertNil(QueueIdentityNormalizer.normalized(nil))
+        XCTAssertNil(QueueIdentityNormalizer.normalized(""))
+        XCTAssertNil(QueueIdentityNormalizer.normalized("   \n"))
     }
 
     func testStreamingTempoPolicyGateDefersWhileInitialSelectionIsLoading() {
@@ -321,22 +277,6 @@ final class QueueItemTests: XCTestCase {
         XCTAssertFalse(
             StreamingPlaylistQueuePolicy.canStart(
                 hasDetailedPlaylistContext: false
-            )
-        )
-    }
-
-    func testExplicitStreamingSelectionDoesNotAutoSkipRejectedTrack() {
-        XCTAssertFalse(
-            StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(
-                origin: .explicitSelection
-            )
-        )
-    }
-
-    func testQueueAdvanceStillAutoSkipsRejectedTrack() {
-        XCTAssertTrue(
-            StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(
-                origin: .queueAdvance
             )
         )
     }

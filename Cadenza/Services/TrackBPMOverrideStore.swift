@@ -33,11 +33,14 @@ final class TrackBPMOverrideStore: @unchecked Sendable {
         guard !identity.isEmpty else { return nil }
         lock.lock()
         defer { lock.unlock() }
-        return loadCache()[identity]?.bpm
+        return loadCache()[identity].flatMap { stored in
+            BPMRange.validatedOriginalBPM(stored.bpm)
+        }
     }
 
     func store(bpm: Double, forIdentity identity: String) {
-        guard !identity.isEmpty, bpm.isFinite, bpm > 0 else { return }
+        guard !identity.isEmpty,
+              let bpm = BPMRange.validatedOriginalBPM(bpm) else { return }
         lock.lock()
         defer { lock.unlock() }
 
