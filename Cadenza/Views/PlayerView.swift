@@ -1117,6 +1117,14 @@ struct PlayerView: View {
             return
         }
 
+        guard StreamingTempoPolicyGate.shouldAutoSkipRejectedPlaylistEntry(
+            origin: streaming.currentEntryOrigin
+        ) else {
+            streaming.pause()
+            audio.presentError("케이던스 범위에 맞지 않는 곡입니다")
+            return
+        }
+
         let transition = streamingTempoSkipCoordinator.transitionForRejected(
             identity: streaming.currentQueueIdentity
         )
