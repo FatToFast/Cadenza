@@ -1,18 +1,36 @@
 import SwiftUI
 
 /// 큰 BPM 숫자 표시 영역 (DESIGN.md 2.1: 화면 중앙 30%)
-/// 목표 BPM, 원곡 BPM, 재생속도 비율을 보여준다.
+/// 목표 케이던스, 원곡 BPM, 재생속도 비율을 보여준다.
 struct BPMDisplayView: View {
     let targetBPM: Double
     let originalBPM: Double
     let playbackRate: Double
     let originalBPMSource: OriginalBPMSource
+    /// 드리프트가 반영된 실제 케이던스. 미지정 시 targetBPM(사용자 설정)을 그대로 쓴다.
+    var effectiveCadence: Double? = nil
     var cadenceFit: RunningCadenceFit? = nil
+
+    /// 대형 숫자로 표시할 케이던스. 드리프트가 있으면 effectiveCadence, 없으면 targetBPM.
+    private var displayCadence: Double { effectiveCadence ?? targetBPM }
+
+    /// 드리프트로 실제 케이던스가 사용자 설정과 달라졌는지.
+    private var isDrifted: Bool {
+        guard let effectiveCadence else { return false }
+        return abs(effectiveCadence - targetBPM) > 0.5
+    }
+
+    private var originalCadenceEquivalent: Double? {
+        BPMRange.runningCadenceEquivalent(
+            forSongBPM: originalBPM,
+            near: targetBPM
+        )
+    }
 
     var body: some View {
         VStack(spacing: 4) {
-            // 목표 BPM (가장 큰 숫자)
-            Text("\(Int(targetBPM))")
+            // 실제 케이던스 (가장 큰 숫자)
+            Text("\(Int(displayCadence))")
                 .font(.bpmDisplay)
                 .foregroundColor(.cadenzaAccent)
                 .contentTransition(.numericText())
@@ -22,6 +40,13 @@ struct BPMDisplayView: View {
                 .tracking(2)
                 .foregroundColor(.cadenzaTextSecondary)
 
+            if isDrifted {
+                Text("설정 \(Int(targetBPM))")
+                    .font(.cadenzaCaption)
+                    .foregroundColor(.cadenzaTextTertiary)
+                    .padding(.top, 2)
+            }
+
             if let cadenceFit, cadenceFit.status != .unknown {
                 cadenceFitBadge(cadenceFit)
                     .padding(.top, 6)
@@ -29,9 +54,9 @@ struct BPMDisplayView: View {
 
             Spacer().frame(height: 12)
 
-            // 원곡 BPM → 목표 BPM + 비율
+            // 원곡 BPM과 러닝 케이던스를 서로 다른 단위로 명확히 표시한다.
             HStack(spacing: 8) {
-                Text("원곡 \(Int(originalBPM))")
+                Text("원곡 \(Int(originalBPM)) BPM")
                     .font(.cadenzaMonoValue)
                     .foregroundColor(.cadenzaTextTertiary)
 
@@ -44,11 +69,19 @@ struct BPMDisplayView: View {
                     .background(sourceColor.opacity(0.12))
                     .clipShape(Capsule())
 
-                Image(systemName: "arrow.right")
-                    .font(.cadenzaCaption)
-                    .foregroundColor(.cadenzaTextTertiary)
+            }
 
-                Text("\(Int(targetBPM))")
+            if let originalCadenceEquivalent,
+               abs(originalCadenceEquivalent - originalBPM) > 0.5 {
+                HStack(spacing: 8) {
+                    Text("러닝 환산 \(Int(originalCadenceEquivalent)) SPM")
+                        .font(.cadenzaMonoValue)
+                        .foregroundColor(.cadenzaTextSecondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("목표 \(Int(targetBPM)) SPM")
                     .font(.cadenzaMonoValue)
                     .foregroundColor(.cadenzaTextSecondary)
             }

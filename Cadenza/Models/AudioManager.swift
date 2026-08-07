@@ -104,20 +104,33 @@ final class AudioManager: ObservableObject {
         didSet { metronomeNode.volume = metronomeVolume }
     }
 
+    /// targetBPM(러닝 케이던스)와 원곡 템포로부터 재생 배속·실제 케이던스를 결정하는
+    /// 템포 계획. 배속이 크게 치솟는 곡은 케이던스를 살짝 드리프트해 원곡 속도로 둔다.
+    private var tempoPlan: BPMRange.TempoPlan {
+        BPMRange.tempoPlan(targetCadence: targetBPM, originalBPM: originalBPM)
+    }
+
     /// targetBPM(러닝 케이던스)를 원곡 템포에 옥타브 폴딩한 "음악의 목표 템포".
     /// 재생 배속·메트로놈 세분화는 케이던스가 아니라 이 값을 기준으로 삼는다.
+    /// 드리프트가 적용된 곡에서는 원곡 BPM(배속 1.0)이 된다.
     var musicalTargetBPM: Double {
-        BPMRange.foldedMusicalTarget(targetCadence: targetBPM, originalBPM: originalBPM)
+        tempoPlan.musicalTarget
+    }
+
+    /// 사용자가 실제로 밟게 되는 케이던스. 드리프트가 없으면 targetBPM과 같고,
+    /// 드리프트가 적용되면 원곡×2^k로 살짝 이동한 값이다. 메트로놈·UI 표시 기준.
+    var effectiveCadence: Double {
+        tempoPlan.effectiveCadence
     }
 
     var playbackRate: Double {
         guard originalBPM > 0 else { return 1.0 }
         let rate = musicalTargetBPM / originalBPM
-        return min(max(rate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
+        return min(max(rate, Double(BPMRange.playbackRateMin)), Double(BPMRange.rateMax))
     }
 
     var metronomeBPM: Double {
-        BPMRange.metronomeCadence(forTargetBPM: targetBPM)
+        BPMRange.metronomeCadence(forTargetBPM: effectiveCadence)
     }
 
     var hasBPMFromMetadata: Bool { _bpmFromMetadata }
@@ -214,8 +227,12 @@ final class AudioManager: ObservableObject {
         self.bpmOverrideStore = bpmOverrideStore
         // init 내 대입은 didSet을 부르지 않으므로 초기 로드는 안전(재저장 루프 없음).
         let storedCadence = UserDefaults.standard.double(forKey: Self.targetCadenceDefaultsKey)
-        if storedCadence >= BPMRange.targetMin, storedCadence <= BPMRange.targetMax {
-            targetBPM = storedCadence
+        if storedCadence > 0 {
+            let normalizedCadence = BPMRange.normalizedTargetCadence(storedCadence)
+            targetBPM = normalizedCadence
+            if normalizedCadence != storedCadence {
+                UserDefaults.standard.set(normalizedCadence, forKey: Self.targetCadenceDefaultsKey)
+            }
         }
         setupEngine()
         observeInterruptions()

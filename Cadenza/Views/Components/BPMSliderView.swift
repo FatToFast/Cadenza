@@ -10,6 +10,17 @@ struct BPMSliderView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            HStack {
+                Text("목표 케이던스")
+                    .font(.cadenzaBody)
+                    .foregroundColor(.cadenzaTextPrimary)
+                Spacer()
+                Text("\(Int(targetBPM)) SPM")
+                    .font(.cadenzaMonoValue)
+                    .foregroundColor(.cadenzaAccent)
+                    .contentTransition(.numericText())
+            }
+
             Slider(
                 value: $targetBPM,
                 in: BPMRange.targetMin...BPMRange.targetMax,
@@ -28,13 +39,13 @@ struct BPMSliderView: View {
             }
 
             HStack(spacing: 10) {
-                quickControlButton(title: "-5", action: onDecrease)
+                quickControlButton(title: "-1", action: onDecrease)
                 quickControlButton(
                     title: "\(Int(BPMRange.targetDefault))",
                     isEmphasized: Int(targetBPM) == Int(BPMRange.targetDefault),
                     action: onReset
                 )
-                quickControlButton(title: "+5", action: onIncrease)
+                quickControlButton(title: "+1", action: onIncrease)
 
                 Spacer()
 
@@ -59,5 +70,6 @@ struct BPMSliderView: View {
                 .background(isEmphasized ? Color.cadenzaAccent : Color.cadenzaBackgroundSecondary)
                 .clipShape(Capsule())
         }
+        .accessibilityLabel(title == "-1" ? "목표 케이던스 1 낮추기" : title == "+1" ? "목표 케이던스 1 높이기" : "목표 케이던스 \(title)로 초기화")
     }
 }

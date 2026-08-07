@@ -26,6 +26,7 @@ targets:
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 9BUZYSAYDY
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
         INFOPLIST_FILE: Cadenza/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.jy.cadenza
@@ -43,6 +44,7 @@ targets:
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 9BUZYSAYDY
         INFOPLIST_FILE: CadenzaLiveActivity/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.jy.cadenza.LiveActivity
         MARKETING_VERSION: "0.1.0"

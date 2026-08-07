@@ -67,8 +67,46 @@ final class AudioManagerGenerationTests: XCTestCase {
         XCTAssertEqual(audio.targetBPM, 170)
     }
 
+    func testCadenceDriftKeepsNinetyFiveBPMTrackAtOriginalSpeed() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        // 원곡 95 → 배속 1.9 대신 원곡 속도(1.0)로 두고 케이던스를 190으로 드리프트.
+        audio.setStreamingBeatAlignment(
+            bpm: 95,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        // 케이던스는 스티키 — 사용자 설정값은 유지된다.
+        XCTAssertEqual(audio.targetBPM, 180)
+        XCTAssertEqual(audio.musicalTargetBPM, 95, accuracy: 0.0001)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+        // 실제 걸음 케이던스·메트로놈은 드리프트된 190을 따른다.
+        XCTAssertEqual(audio.effectiveCadence, 190, accuracy: 0.0001)
+        XCTAssertEqual(audio.metronomeBPM, 190, accuracy: 0.0001)
+    }
+
+    func testPlaybackRateNeverDropsBelowOriginalSpeedEvenWithOutOfPolicyCadence() {
+        let audio = AudioManager()
+        audio.targetBPM = 60
+
+        audio.setStreamingBeatAlignment(
+            bpm: 280,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+    }
+
+    func testMetronomeStartsOff() {
+        XCTAssertFalse(AudioManager().metronomeEnabled)
+    }
+
     func testMetronomeRequiresConfirmedBPM() {
         let audio = AudioManager()
+        audio.metronomeEnabled = true
 
         // 기본 상태: needsConfirmation — BPM 확정 안 됨
         XCTAssertFalse(audio.canRunMetronomeForCurrentBeatSync)
@@ -98,6 +136,7 @@ final class AudioManagerGenerationTests: XCTestCase {
 
     func testLowConfidenceBeatGridFallsBackToBPMOnlyMetronome() {
         let audio = AudioManager()
+        audio.metronomeEnabled = true
 
         audio.setStreamingBeatAlignment(
             bpm: 120,

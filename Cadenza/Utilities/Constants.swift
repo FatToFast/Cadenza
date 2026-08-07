@@ -4,18 +4,51 @@ import UIKit
 // MARK: - BPM Ranges
 
 enum BPMRange {
-    static let targetMin: Double = 90
+    static let targetMin: Double = 140
     static let targetMax: Double = 220
     static let targetDefault: Double = 180
     static let originalDefault: Double = 120
     static let originalMin: Double = 30
     static let originalMax: Double = 300
     static let rateMin: Float = 0.5
+    /// Runner-facing playback must never slow a track below its original speed.
+    /// Keep the lower-level AVAudioUnit-supported minimum separate so defensive
+    /// clamps do not accidentally re-enable <1.0x playback.
+    static let playbackRateMin: Float = 1.0
     static let rateMax: Float = 2.5
     static let doubleTimeThreshold: Double = 100
 
+    /// 케이던스 드리프트: 원곡×2^k 후보가 사용자 케이던스에서 이 값(±BPM) 이내면
+    /// 원곡 속도(배속 1.0) 재생으로 두고 케이던스를 그 후보로 살짝 이동시킨다.
+    static let cadenceDriftTolerance: Double = 10
+    /// 기본 폴딩 배속이 이 값을 초과할 때만 드리프트를 고려한다. 이하이면 음질 손실이
+    /// 크지 않으므로 사용자가 설정한 케이던스를 그대로 존중한다.
+    static let driftRateThreshold: Double = 1.25
+
+    /// 이전 버전에서 90대 BPM으로 저장한 목표값을 러닝 케이던스 범위로 올린다.
+    static func normalizedTargetCadence(_ value: Double) -> Double {
+        guard value.isFinite, value > 0 else { return targetDefault }
+        let cadence = value < targetMin ? min(value * 2, targetMax) : value
+        return min(max(cadence, targetMin), targetMax)
+    }
+
+    /// 곡 BPM의 반/두 배 후보 중 러닝 케이던스 범위에 들어오는 값을 반환한다.
+    /// 90 BPM과 180 BPM처럼 음악적으로 같은 박자를 UI에서 같은 SPM 체계로 보여준다.
+    static func runningCadenceEquivalent(
+        forSongBPM bpm: Double,
+        near targetCadence: Double = targetDefault
+    ) -> Double? {
+        guard bpm.isFinite, bpm > 0 else { return nil }
+        let candidates = [0.25, 0.5, 1.0, 2.0, 4.0]
+            .map { bpm * $0 }
+            .filter { $0 >= targetMin && $0 <= targetMax }
+        return candidates.min { lhs, rhs in
+            abs(lhs - targetCadence) < abs(rhs - targetCadence)
+        }
+    }
+
     static func automaticTarget(forOriginalBPM originalBPM: Double) -> Double {
-        originalBPM < doubleTimeThreshold ? 90 : 180
+        runningCadenceEquivalent(forSongBPM: originalBPM) ?? targetDefault
     }
 
     /// targetCadence × 2^k (k: 폴딩 배수) 후보 중 배속이 1.0 이상이면서 가장 1.0에
@@ -54,10 +87,55 @@ enum BPMRange {
         let cadence = targetBPM < doubleTimeThreshold ? targetBPM * 2 : targetBPM
         return min(max(cadence, targetMin), targetMax)
     }
+
+    /// 재생 배속과 실제 걸음 케이던스를 함께 결정하는 템포 계획.
+    /// `musicalTarget`은 재생 배속 계산(musicalTarget/originalBPM)에,
+    /// `effectiveCadence`는 메트로놈·UI 표시에 쓰인다.
+    struct TempoPlan {
+        let musicalTarget: Double
+        let effectiveCadence: Double
+    }
+
+    /// 원곡 91~95 BPM처럼 케이던스 180에 맞추면 배속이 1.9 근처까지 치솟아 음질이
+    /// 크게 나빠지는 곡은, 원곡 속도(배속 1.0)로 두고 케이던스를 원곡×2^k(±tolerance)로
+    /// 살짝 이동시키는 편이 낫다. 이 규칙을 "케이던스 드리프트"라 한다.
+    ///
+    /// - 기본: `foldedMusicalTarget` 결과 = musicalTarget, effectiveCadence = targetCadence.
+    /// - 드리프트: 기본 폴딩 배속이 `driftRateThreshold`를 초과하고, 원곡×2^k(k ∈ {0,1,2})
+    ///   중 targetCadence와의 차가 `cadenceDriftTolerance` 이내인 값이 있으면
+    ///   → musicalTarget = originalBPM (배속 1.0), effectiveCadence = 가장 가까운 그 값.
+    /// - originalBPM <= 0이면 폴딩 근거가 없어 (targetCadence, targetCadence) 반환.
+    static func tempoPlan(targetCadence: Double, originalBPM: Double) -> TempoPlan {
+        guard originalBPM > 0 else {
+            return TempoPlan(musicalTarget: targetCadence, effectiveCadence: targetCadence)
+        }
+
+        let baseTarget = foldedMusicalTarget(targetCadence: targetCadence, originalBPM: originalBPM)
+        let baseRate = baseTarget / originalBPM
+        guard baseRate > driftRateThreshold else {
+            return TempoPlan(musicalTarget: baseTarget, effectiveCadence: targetCadence)
+        }
+
+        var driftCadence: Double?
+        var driftDistance = Double.infinity
+        for k in 0...2 {
+            let candidate = originalBPM * pow(2.0, Double(k))
+            let distance = abs(candidate - targetCadence)
+            if distance <= cadenceDriftTolerance, distance < driftDistance {
+                driftDistance = distance
+                driftCadence = candidate
+            }
+        }
+
+        if let driftCadence {
+            return TempoPlan(musicalTarget: originalBPM, effectiveCadence: driftCadence)
+        }
+        return TempoPlan(musicalTarget: baseTarget, effectiveCadence: targetCadence)
+    }
 }
 
 enum MetronomeDefaults {
-    static let enabled = true
+    static let enabled = false
     static let volume: Float = 0.6
     static let beatsPerBar = 4
 }

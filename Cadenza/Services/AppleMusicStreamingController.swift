@@ -397,7 +397,7 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     func applyPlaybackRate(_ playbackRate: Double) {
-        let clamped = min(max(playbackRate, Double(BPMRange.rateMin)), Double(BPMRange.rateMax))
+        let clamped = min(max(playbackRate, Double(BPMRange.playbackRateMin)), Double(BPMRange.rateMax))
         desiredPlaybackRate = Float(clamped)
         guard isPlaying || player.state.playbackStatus == .playing else { return }
         enforcePlaybackRate(reason: "requested")

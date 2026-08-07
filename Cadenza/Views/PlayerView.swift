@@ -44,6 +44,7 @@ struct PlayerView: View {
                             originalBPM: nowPlaying.originalBPM,
                             playbackRate: audio.playbackRate,
                             originalBPMSource: nowPlaying.originalBPMSource,
+                            effectiveCadence: audio.effectiveCadence,
                             cadenceFit: currentCadenceFit
                         )
                         .padding(.vertical, 16)
@@ -52,9 +53,9 @@ struct PlayerView: View {
                         BPMSliderView(
                             targetBPM: $audio.targetBPM,
                             playbackRate: audio.playbackRate,
-                            onDecrease: { audio.nudgeTargetBPM(by: -5) },
+                            onDecrease: { audio.nudgeTargetBPM(by: -1) },
                             onReset: { audio.resetTargetBPM() },
-                            onIncrease: { audio.nudgeTargetBPM(by: 5) }
+                            onIncrease: { audio.nudgeTargetBPM(by: 1) }
                         )
                             .padding(.horizontal, 20)
 

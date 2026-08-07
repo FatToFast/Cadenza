@@ -258,18 +258,32 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertTrue(OriginalBPMSource.assumedDefault.helperText.contains("120 BPM"))
     }
 
-    func testAutomaticTargetKeepsSlowTracksNearOriginalTempo() {
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 89), 90)
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 90), 90)
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 92), 90)
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 99), 90)
+    func testAutomaticTargetUsesRunningCadenceEquivalent() {
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 89), 178)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 90), 180)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 92), 184)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 99), 198)
     }
 
-    func testAutomaticTargetUsesDoubleTimeAtOneHundredAndAbove() {
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 100), 180)
-        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 103), 180)
+    func testAutomaticTargetFallsBackWhenNoRunningEquivalentExists() {
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 100), 200)
+        XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 103), 206)
         XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 120), 180)
         XCTAssertEqual(BPMRange.automaticTarget(forOriginalBPM: 128), 180)
+    }
+
+    func testStoredHalfTimeTargetMigratesToRunningCadence() {
+        XCTAssertEqual(BPMRange.normalizedTargetCadence(90), 180)
+        XCTAssertEqual(BPMRange.normalizedTargetCadence(95), 190)
+        XCTAssertEqual(BPMRange.normalizedTargetCadence(180), 180)
+        XCTAssertEqual(BPMRange.normalizedTargetCadence(300), 220)
+    }
+
+    func testSongBPMHasConsistentRunningCadenceEquivalent() {
+        XCTAssertEqual(BPMRange.runningCadenceEquivalent(forSongBPM: 90), 180)
+        XCTAssertEqual(BPMRange.runningCadenceEquivalent(forSongBPM: 180), 180)
+        XCTAssertEqual(BPMRange.runningCadenceEquivalent(forSongBPM: 85, near: 170), 170)
+        XCTAssertNil(BPMRange.runningCadenceEquivalent(forSongBPM: 120))
     }
 
     // MARK: - 옥타브 폴딩 (스티키 케이던스 → 음악 목표 템포)
@@ -328,6 +342,58 @@ final class PlaybackModelsTests: XCTestCase {
         // originalBPM <= 0이면 폴딩 근거가 없어 케이던스를 그대로 반환 (배속 가드는 별도 유지).
         XCTAssertEqual(BPMRange.foldedMusicalTarget(targetCadence: 175, originalBPM: 0), 175)
         XCTAssertEqual(BPMRange.foldedMusicalTarget(targetCadence: 175, originalBPM: -10), 175)
+    }
+
+    // MARK: - 케이던스 드리프트 (배속 대신 케이던스를 살짝 이동)
+
+    func testTempoPlanDriftsCadenceForNinetyFiveBPMTrack() {
+        // 설정 180, 원곡 95 → 기본 폴딩 배속 1.895 > 1.25, 190이 180±10 이내
+        // → 원곡 속도(배속 1.0), 케이던스 190으로 드리프트.
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 95)
+        XCTAssertEqual(plan.musicalTarget, 95, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 190, accuracy: 0.0001)
+        XCTAssertEqual(plan.musicalTarget / 95, 1.0, accuracy: 0.0001)
+    }
+
+    func testTempoPlanDriftsCadenceForNinetyTwoBPMTrack() {
+        // 설정 180, 원곡 92 → 184가 180±10 이내 → 배속 1.0, 케이던스 184.
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 92)
+        XCTAssertEqual(plan.musicalTarget, 92, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 184, accuracy: 0.0001)
+    }
+
+    func testTempoPlanKeepsFoldingWhenNoCandidateWithinBand() {
+        // 설정 180, 원곡 100 → 원곡×2=200은 180±10 밖 → 드리프트 없음, 기존 폴딩 유지.
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 100)
+        XCTAssertEqual(plan.musicalTarget, 180, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 180, accuracy: 0.0001)
+        XCTAssertEqual(plan.musicalTarget / 100, 1.8, accuracy: 0.0001)
+    }
+
+    func testTempoPlanSkipsDriftWhenBaseRateWithinThreshold() {
+        // 설정 180, 원곡 170 → 기본 배속 1.059 ≤ 1.25 → 드리프트 안 함, 케이던스 180.
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 170)
+        XCTAssertEqual(plan.musicalTarget, 180, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 180, accuracy: 0.0001)
+    }
+
+    func testTempoPlanSkipsDriftWhenCandidateOutsideBand() {
+        // 설정 170, 원곡 92 → 184는 170±10 밖 → 드리프트 안 함, 배속 1.848 유지.
+        let plan = BPMRange.tempoPlan(targetCadence: 170, originalBPM: 92)
+        XCTAssertEqual(plan.musicalTarget, 170, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 170, accuracy: 0.0001)
+        XCTAssertEqual(plan.musicalTarget / 92, 1.8478, accuracy: 0.0001)
+    }
+
+    func testTempoPlanReturnsCadenceWhenOriginalBPMNonPositive() {
+        let plan = BPMRange.tempoPlan(targetCadence: 180, originalBPM: 0)
+        XCTAssertEqual(plan.musicalTarget, 180, accuracy: 0.0001)
+        XCTAssertEqual(plan.effectiveCadence, 180, accuracy: 0.0001)
+    }
+
+    func testPlaybackRatePolicyMinimumIsOriginalSpeed() {
+        XCTAssertEqual(BPMRange.playbackRateMin, 1.0)
+        XCTAssertGreaterThan(BPMRange.playbackRateMin, BPMRange.rateMin)
     }
 
     func testMetronomeCadenceUsesDoubleTimeForNinetyTarget() {
