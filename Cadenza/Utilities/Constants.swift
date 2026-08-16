@@ -16,7 +16,25 @@ enum BPMRange {
     /// clamps do not accidentally re-enable <1.0x playback.
     static let playbackRateMin: Float = 1.0
     static let rateMax: Float = 2.5
+    /// MusicKit may briefly quantize or reset playbackRate while a queue entry changes.
+    /// Differences inside this band are harmless only when the actual rate is still >= 1.0.
+    static let playbackRateTolerance: Float = 0.005
     static let doubleTimeThreshold: Double = 100
+
+    /// Every runner-facing playback path must use the same finite, no-slowdown clamp.
+    static func sanitizedPlaybackRate(_ rate: Double) -> Float {
+        guard rate.isFinite else { return playbackRateMin }
+        return Float(min(max(rate, Double(playbackRateMin)), Double(rateMax)))
+    }
+
+    /// A sub-1.0 actual rate is always corrected, even when it is numerically close
+    /// to the desired value. This prevents tolerance checks from legitimizing slowdown.
+    static func shouldEnforcePlaybackRate(actual: Float, desired: Float) -> Bool {
+        guard actual.isFinite else { return true }
+        let safeDesired = sanitizedPlaybackRate(Double(desired))
+        if actual < playbackRateMin { return true }
+        return abs(actual - safeDesired) > playbackRateTolerance
+    }
 
     /// 케이던스 드리프트: 원곡×2^k 후보가 사용자 케이던스에서 이 값(±BPM) 이내면
     /// 원곡 속도(배속 1.0) 재생으로 두고 케이던스를 그 후보로 살짝 이동시킨다.

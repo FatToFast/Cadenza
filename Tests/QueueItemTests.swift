@@ -129,6 +129,64 @@ final class QueueItemTests: XCTestCase {
     }
 }
 
+final class LocalPlaylistStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var temporaryDirectory: URL!
+    private let suiteName = "test.cadenza.local-playlist"
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        defaults = UserDefaults(suiteName: suiteName)
+        temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    override func tearDownWithError() throws {
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: temporaryDirectory)
+        defaults = nil
+        temporaryDirectory = nil
+        try super.tearDownWithError()
+    }
+
+    func testPlaylistRoundTripPreservesOrderAndCurrentIndex() throws {
+        let urls = try makeFiles(named: ["01 First.mp3", "02 Second.mp3", "03 Third.mp3"])
+        let store = LocalPlaylistStore(defaults: defaults, storageKey: "playlist.test")
+
+        try store.save(fileURLs: urls, currentIndex: 1)
+        let restored = LocalPlaylistStore(
+            defaults: defaults,
+            storageKey: "playlist.test"
+        ).load()
+
+        XCTAssertEqual(restored?.fileURLs.map(\.lastPathComponent), urls.map(\.lastPathComponent))
+        XCTAssertEqual(restored?.currentIndex, 1)
+    }
+
+    func testClearRemovesPersistedPlaylist() throws {
+        let urls = try makeFiles(named: ["song.mp3"])
+        let store = LocalPlaylistStore(defaults: defaults, storageKey: "playlist.clear")
+        try store.save(fileURLs: urls, currentIndex: 0)
+
+        store.clear()
+
+        XCTAssertNil(store.load())
+    }
+
+    private func makeFiles(named names: [String]) throws -> [URL] {
+        try names.map { name in
+            let url = temporaryDirectory.appendingPathComponent(name)
+            try Data("test".utf8).write(to: url)
+            return url
+        }
+    }
+}
+
 private struct FixedRandomNumberGenerator: RandomNumberGenerator {
     private var values: [UInt64]
 

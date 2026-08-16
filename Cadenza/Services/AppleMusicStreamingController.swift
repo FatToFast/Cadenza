@@ -112,6 +112,7 @@ final class AppleMusicStreamingController: ObservableObject {
     private var queueCancellable: AnyCancellable?
     private var stateCancellable: AnyCancellable?
     private var nowPlayingTask: Task<Void, Never>?
+    private var rateReapplicationTask: Task<Void, Never>?
     private var bpmAnalysisTask: Task<Void, Never>?
     private var activePreviewAnalysisKey: String?
     private var failedPreviewAnalysisKeys: Set<String> = []
@@ -374,6 +375,8 @@ final class AppleMusicStreamingController: ObservableObject {
         stateCancellable = nil
         nowPlayingTask?.cancel()
         nowPlayingTask = nil
+        rateReapplicationTask?.cancel()
+        rateReapplicationTask = nil
         currentSong = nil
         currentTitle = nil
         currentArtist = nil
@@ -397,8 +400,7 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     func applyPlaybackRate(_ playbackRate: Double) {
-        let clamped = min(max(playbackRate, Double(BPMRange.playbackRateMin)), Double(BPMRange.rateMax))
-        desiredPlaybackRate = Float(clamped)
+        desiredPlaybackRate = BPMRange.sanitizedPlaybackRate(playbackRate)
         guard isPlaying || player.state.playbackStatus == .playing else { return }
         enforcePlaybackRate(reason: "requested")
     }
@@ -492,6 +494,7 @@ final class AppleMusicStreamingController: ObservableObject {
                 self?.syncShuffleStatus()
                 self?.syncRepeatStatus()
                 self?.syncCurrentEntryFromQueue()
+                self?.enforcePlaybackRateIfPlaying(reason: "state-change")
             }
         }
 
@@ -906,11 +909,17 @@ final class AppleMusicStreamingController: ObservableObject {
     }
 
     private func reapplyPlaybackRateAfterStartup() {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            self?.enforcePlaybackRateIfPlaying(reason: "startup-delay")
-            try? await Task.sleep(nanoseconds: 850_000_000)
-            self?.enforcePlaybackRateIfPlaying(reason: "startup-delay-2")
+        rateReapplicationTask?.cancel()
+        rateReapplicationTask = Task { @MainActor [weak self] in
+            // MusicKit can reset rate more than once while a new entry starts.
+            // Re-check densely during that short window instead of allowing up to
+            // one second of an unintended slower rate before the regular poll.
+            let delays: [UInt64] = [100_000_000, 200_000_000, 350_000_000, 650_000_000]
+            for (index, delay) in delays.enumerated() {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+                self?.enforcePlaybackRateIfPlaying(reason: "startup-retry-\(index + 1)")
+            }
         }
     }
 
@@ -921,9 +930,16 @@ final class AppleMusicStreamingController: ObservableObject {
 
     private func enforcePlaybackRate(reason: String) {
         let before = player.state.playbackRate
-        guard abs(before - desiredPlaybackRate) > 0.005 else { return }
+        guard BPMRange.shouldEnforcePlaybackRate(
+            actual: before,
+            desired: desiredPlaybackRate
+        ) else { return }
         player.state.playbackRate = desiredPlaybackRate
-        logger.info("[stream_rate] \(reason, privacy: .public) requested=\(self.desiredPlaybackRate) before=\(before) after=\(self.player.state.playbackRate)")
+        let after = player.state.playbackRate
+        logger.info("[stream_rate] \(reason, privacy: .public) requested=\(self.desiredPlaybackRate) before=\(before) after=\(after)")
+        if after < BPMRange.playbackRateMin {
+            logger.error("[stream_rate] slowdown correction pending requested=\(self.desiredPlaybackRate) actual=\(after)")
+        }
     }
 
     private func storeKey(_ id: String) -> String {

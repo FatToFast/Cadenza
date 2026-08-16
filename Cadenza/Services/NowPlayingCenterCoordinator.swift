@@ -59,10 +59,18 @@ final class NowPlayingCenterCoordinator {
         info[MPNowPlayingInfoPropertyPlaybackRate] = audio.state == .playing ? audio.playbackRate : 0.0
         info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = audio.playbackRate
 
-        if let data = audio.currentArtworkData, let image = UIImage(data: data) {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        if let data = audio.currentArtworkData, let artwork = Self.makeArtwork(from: data) {
+            info[MPMediaItemPropertyArtwork] = artwork
         }
 
         infoCenter.nowPlayingInfo = info
+    }
+
+    /// MediaPlayer invokes the artwork request handler on its own access queue.
+    /// Build the closure outside this coordinator's MainActor isolation so Swift 6
+    /// does not insert a main-executor precondition into that callback.
+    nonisolated static func makeArtwork(from data: Data) -> MPMediaItemArtwork? {
+        guard let image = UIImage(data: data) else { return nil }
+        return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 }

@@ -124,9 +124,12 @@ final class AudioManager: ObservableObject {
     }
 
     var playbackRate: Double {
-        guard originalBPM > 0 else { return 1.0 }
+        // `originalDefault` is a display/confirmation placeholder, not measured tempo.
+        // Applying it used to start unknown songs at 1.5x and then audibly slow them
+        // when their real BPM arrived asynchronously.
+        guard originalBPMSource != .assumedDefault, originalBPM > 0 else { return 1.0 }
         let rate = musicalTargetBPM / originalBPM
-        return min(max(rate, Double(BPMRange.playbackRateMin)), Double(BPMRange.rateMax))
+        return Double(BPMRange.sanitizedPlaybackRate(rate))
     }
 
     var metronomeBPM: Double {
@@ -206,6 +209,8 @@ final class AudioManager: ObservableObject {
     private var currentTrackURL: URL?
     private var currentTrackOverrideKey: String?
     private let bpmOverrideStore: TrackBPMOverrideStore
+    private let localPlaylistStore: LocalPlaylistStore
+    private var shouldLoadRestoredLocalPlaylist = false
     private var isAudioSessionConfigured = false
     private var progressTimer: Timer?
     private var pendingPresetBPMHint: Double?
@@ -223,8 +228,12 @@ final class AudioManager: ObservableObject {
     /// 러닝 케이던스(targetBPM)는 전역·스티키·영속 값이다. 곡이 바뀌어도 유지된다.
     static let targetCadenceDefaultsKey = "com.jy.cadenza.targetCadence"
 
-    init(bpmOverrideStore: TrackBPMOverrideStore = .shared) {
+    init(
+        bpmOverrideStore: TrackBPMOverrideStore = .shared,
+        localPlaylistStore: LocalPlaylistStore = .shared
+    ) {
         self.bpmOverrideStore = bpmOverrideStore
+        self.localPlaylistStore = localPlaylistStore
         // init 내 대입은 didSet을 부르지 않으므로 초기 로드는 안전(재저장 루프 없음).
         let storedCadence = UserDefaults.standard.double(forKey: Self.targetCadenceDefaultsKey)
         if storedCadence > 0 {
@@ -233,6 +242,14 @@ final class AudioManager: ObservableObject {
             if normalizedCadence != storedCadence {
                 UserDefaults.standard.set(normalizedCadence, forKey: Self.targetCadenceDefaultsKey)
             }
+        }
+        if let restored = localPlaylistStore.load() {
+            localPlaylist = LocalFilePlaylist(
+                fileURLs: restored.fileURLs,
+                currentIndex: restored.currentIndex
+            )
+            shouldLoadRestoredLocalPlaylist = true
+            syncPlaybackEndBehavior()
         }
         setupEngine()
         observeInterruptions()
@@ -368,9 +385,11 @@ final class AudioManager: ObservableObject {
             $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
         }
         guard !sorted.isEmpty else { return }
-        var playlist = LocalFilePlaylist(fileURLs: sorted)
+        let playlist = LocalFilePlaylist(fileURLs: sorted)
         guard let item = playlist.currentItem, case .file(let url) = item.source else { return }
         localPlaylist = playlist
+        shouldLoadRestoredLocalPlaylist = false
+        persistLocalPlaylist()
         syncPlaybackEndBehavior()
         await loadFile(url: url)
         if autoPlay, state == .ready { play() }
@@ -379,7 +398,19 @@ final class AudioManager: ObservableObject {
     /// 외부에서 단일 곡 로드 시 (Apple Music 보관함 import 등) — 플레이리스트 비우기.
     func clearLocalPlaylist() {
         localPlaylist = LocalFilePlaylist()
+        shouldLoadRestoredLocalPlaylist = false
+        localPlaylistStore.clear()
         syncPlaybackEndBehavior()
+    }
+
+    /// Called once from the app root to load the current item from the playlist
+    /// restored during initialization. Restoring never starts playback by itself.
+    func restoreLastLocalPlaylistIfNeeded() async {
+        guard shouldLoadRestoredLocalPlaylist else { return }
+        shouldLoadRestoredLocalPlaylist = false
+        guard let item = localPlaylist.currentItem,
+              case .file(let url) = item.source else { return }
+        await loadFile(url: url)
     }
 
     func nextLocalTrack() async {
@@ -387,6 +418,7 @@ final class AudioManager: ObservableObject {
         var playlist = localPlaylist
         guard let item = playlist.moveToNext(), case .file(let url) = item.source else { return }
         localPlaylist = playlist
+        persistLocalPlaylist()
         syncPlaybackEndBehavior()
         await loadFile(url: url)
         if shouldAutoPlay, state == .ready { play() }
@@ -397,6 +429,7 @@ final class AudioManager: ObservableObject {
         var playlist = localPlaylist
         guard let item = playlist.moveToPrevious(), case .file(let url) = item.source else { return }
         localPlaylist = playlist
+        persistLocalPlaylist()
         syncPlaybackEndBehavior()
         await loadFile(url: url)
         if shouldAutoPlay, state == .ready { play() }
@@ -411,6 +444,7 @@ final class AudioManager: ObservableObject {
         guard let item = playlist.jumpTo(index: index),
               case .file(let url) = item.source else { return }
         localPlaylist = playlist
+        persistLocalPlaylist()
         syncPlaybackEndBehavior()
         await loadFile(url: url)
         if shouldAutoPlay, state == .ready { play() }
@@ -420,6 +454,7 @@ final class AudioManager: ObservableObject {
         var playlist = localPlaylist
         guard playlist.toggleShuffle() != nil else { return }
         localPlaylist = playlist
+        persistLocalPlaylist()
         syncPlaybackEndBehavior()
     }
 
@@ -430,6 +465,7 @@ final class AudioManager: ObservableObject {
 
         if let item = playlist.moveToNext(), case .file(let url) = item.source {
             localPlaylist = playlist
+            persistLocalPlaylist()
             syncPlaybackEndBehavior()
             await loadFile(url: url)
             if state == .ready { play() }
@@ -439,6 +475,7 @@ final class AudioManager: ObservableObject {
         // 마지막 곡 — repeat 켜져 있으면 처음으로
         if localRepeatEnabled, let item = playlist.moveToStart(), case .file(let url) = item.source {
             localPlaylist = playlist
+            persistLocalPlaylist()
             syncPlaybackEndBehavior()
             await loadFile(url: url)
             if state == .ready { play() }
@@ -452,6 +489,19 @@ final class AudioManager: ObservableObject {
             playbackEndBehavior = localRepeatEnabled ? .loop : .notify
         } else {
             playbackEndBehavior = .notify
+        }
+    }
+
+    private func persistLocalPlaylist() {
+        let urls = localPlaylist.originalFileURLs
+        guard !urls.isEmpty else { return }
+        do {
+            try localPlaylistStore.save(
+                fileURLs: urls,
+                currentIndex: localPlaylist.currentIndexInOriginalOrder
+            )
+        } catch {
+            logger.error("Failed to persist local playlist: \(error.localizedDescription)")
         }
     }
 

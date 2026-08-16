@@ -22,6 +22,7 @@ struct CadenzaApp: App {
                     if liveActivityCoordinator == nil {
                         liveActivityCoordinator = LiveActivityCoordinator(audio: audioManager)
                     }
+                    await audioManager.restoreLastLocalPlaylistIfNeeded()
                 }
         }
     }

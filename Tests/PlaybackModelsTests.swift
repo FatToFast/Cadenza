@@ -396,6 +396,20 @@ final class PlaybackModelsTests: XCTestCase {
         XCTAssertGreaterThan(BPMRange.playbackRateMin, BPMRange.rateMin)
     }
 
+    func testPlaybackRateSanitizerRejectsSlowAndNonFiniteRequests() {
+        XCTAssertEqual(BPMRange.sanitizedPlaybackRate(0.75), 1.0)
+        XCTAssertEqual(BPMRange.sanitizedPlaybackRate(.nan), 1.0)
+        XCTAssertEqual(BPMRange.sanitizedPlaybackRate(.infinity), 1.0)
+        XCTAssertEqual(BPMRange.sanitizedPlaybackRate(9.0), BPMRange.rateMax)
+    }
+
+    func testPlaybackRateEnforcementNeverToleratesActualSlowdown() {
+        XCTAssertTrue(BPMRange.shouldEnforcePlaybackRate(actual: 0.999, desired: 1.0))
+        XCTAssertTrue(BPMRange.shouldEnforcePlaybackRate(actual: .nan, desired: 1.0))
+        XCTAssertFalse(BPMRange.shouldEnforcePlaybackRate(actual: 1.002, desired: 1.0))
+        XCTAssertTrue(BPMRange.shouldEnforcePlaybackRate(actual: 1.0, desired: 1.25))
+    }
+
     func testMetronomeCadenceUsesDoubleTimeForNinetyTarget() {
         XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 90), 180)
         XCTAssertEqual(BPMRange.metronomeCadence(forTargetBPM: 95), 190)

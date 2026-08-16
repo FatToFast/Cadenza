@@ -41,3 +41,13 @@ Package.resolved
 
 # Local secrets (xcconfig) — copy Cadenza.xcconfig.example to Cadenza.xcconfig
 Cadenza.xcconfig
+
+# Android / Gradle
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
+
+# Personal MP3 converter runtime files
+media-server/downloads/

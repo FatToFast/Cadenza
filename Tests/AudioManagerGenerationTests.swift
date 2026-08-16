@@ -21,10 +21,37 @@ final class AudioManagerGenerationTests: XCTestCase {
         c.cancel()
     }
     func testDefaultNowPlayingEmpty() {
-        let info = AudioManager().currentNowPlayingInfo
+        let audio = AudioManager()
+        let info = audio.currentNowPlayingInfo
         XCTAssertNil(info.title)
         XCTAssertEqual(info.originalBPM, BPMRange.originalDefault)
         XCTAssertNil(info.queueContext)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+    }
+
+    func testUnknownStreamingBPMStaysAtOriginalSpeedUntilResolved() {
+        let audio = AudioManager()
+        audio.targetBPM = 180
+
+        audio.setStreamingBeatAlignment(
+            bpm: nil,
+            source: .metadata,
+            beatOffsetSeconds: nil
+        )
+
+        XCTAssertEqual(audio.originalBPMSource, .assumedDefault)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
+
+        // A delayed result that chooses cadence drift must not cause an audible
+        // 1.5x -> 1.0x slowdown inside the song.
+        let unresolvedRate = audio.playbackRate
+        audio.setStreamingBeatAlignment(
+            bpm: 95,
+            source: .analysis,
+            beatOffsetSeconds: nil
+        )
+        XCTAssertGreaterThanOrEqual(audio.playbackRate, unresolvedRate)
+        XCTAssertEqual(audio.playbackRate, 1.0, accuracy: 0.0001)
     }
 
     func testStreamingBeatAlignmentForNinetyBPMKeepsPlaybackRateNearOne() {

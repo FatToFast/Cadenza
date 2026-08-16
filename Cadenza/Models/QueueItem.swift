@@ -42,11 +42,11 @@ struct LocalFilePlaylist: Sendable, Equatable {
         }
     }
 
-    init(fileURLs urls: [URL]) {
+    init(fileURLs urls: [URL], currentIndex: Int? = nil) {
         let items = urls.enumerated().map { index, url in
             QueueItem.localFile(url: url, index: index)
         }
-        self.init(items: items)
+        self.init(items: items, currentIndex: currentIndex)
     }
 
     var isEmpty: Bool { items.isEmpty }
@@ -64,6 +64,16 @@ struct LocalFilePlaylist: Sendable, Equatable {
         return currentIndex < items.count - 1
     }
     var canShuffle: Bool { items.count > 1 }
+    var originalFileURLs: [URL] {
+        originalItems.compactMap { item in
+            guard case .file(let url) = item.source else { return nil }
+            return url
+        }
+    }
+    var currentIndexInOriginalOrder: Int? {
+        guard let currentItem else { return nil }
+        return originalItems.firstIndex { $0.id == currentItem.id }
+    }
     var queueContext: NowPlayingInfo.QueueContext? {
         guard let currentIndex, items.indices.contains(currentIndex) else { return nil }
         let nextIndex = currentIndex + 1
@@ -137,6 +147,119 @@ struct LocalFilePlaylist: Sendable, Equatable {
             items.firstIndex { $0.id == id }
         } ?? (items.isEmpty ? nil : 0)
         isShuffled = false
+    }
+}
+
+struct LocalPlaylistPersistenceSnapshot: Equatable {
+    let fileURLs: [URL]
+    let currentIndex: Int
+}
+
+/// Persists document-picker URLs as bookmarks so the last local playlist can
+/// be resolved again after the app process is relaunched.
+final class LocalPlaylistStore: @unchecked Sendable {
+    private struct StoredPlaylist: Codable {
+        let bookmarks: [Data]
+        let currentIndex: Int
+    }
+
+    static let shared = LocalPlaylistStore(defaults: .standard)
+
+    private let defaults: UserDefaults
+    private let storageKey: String
+    private let lock = NSLock()
+
+    init(
+        defaults: UserDefaults,
+        storageKey: String = "com.jy.cadenza.local-playlist.v1"
+    ) {
+        self.defaults = defaults
+        self.storageKey = storageKey
+    }
+
+    func save(fileURLs: [URL], currentIndex: Int?) throws {
+        guard !fileURLs.isEmpty else {
+            clear()
+            return
+        }
+
+        let bookmarks = try fileURLs.map(Self.makeBookmark(for:))
+        let normalizedIndex = min(max(currentIndex ?? 0, 0), fileURLs.count - 1)
+        let stored = StoredPlaylist(bookmarks: bookmarks, currentIndex: normalizedIndex)
+        let data = try JSONEncoder().encode(stored)
+
+        lock.lock()
+        defaults.set(data, forKey: storageKey)
+        lock.unlock()
+    }
+
+    func load() -> LocalPlaylistPersistenceSnapshot? {
+        lock.lock()
+        let data = defaults.data(forKey: storageKey)
+        lock.unlock()
+
+        guard let data,
+              let stored = try? JSONDecoder().decode(StoredPlaylist.self, from: data),
+              !stored.bookmarks.isEmpty else {
+            return nil
+        }
+
+        var restored: [(sourceIndex: Int, url: URL)] = []
+        var needsBookmarkRefresh = false
+        for (index, bookmark) in stored.bookmarks.enumerated() {
+            var isStale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) else {
+                continue
+            }
+            needsBookmarkRefresh = needsBookmarkRefresh || isStale
+            restored.append((index, url))
+        }
+
+        guard !restored.isEmpty else {
+            clear()
+            return nil
+        }
+
+        let restoredCurrentIndex = restored.firstIndex { $0.sourceIndex == stored.currentIndex }
+            ?? restored.lastIndex { $0.sourceIndex < stored.currentIndex }
+            ?? 0
+        let snapshot = LocalPlaylistPersistenceSnapshot(
+            fileURLs: restored.map(\.url),
+            currentIndex: restoredCurrentIndex
+        )
+
+        // Drop broken bookmark entries and refresh the persisted index.
+        if needsBookmarkRefresh
+            || restored.count != stored.bookmarks.count
+            || restoredCurrentIndex != stored.currentIndex {
+            try? save(fileURLs: snapshot.fileURLs, currentIndex: snapshot.currentIndex)
+        }
+        return snapshot
+    }
+
+    func clear() {
+        lock.lock()
+        defaults.removeObject(forKey: storageKey)
+        lock.unlock()
+    }
+
+    private static func makeBookmark(for url: URL) throws -> Data {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        return try url.bookmarkData(
+            options: [.minimalBookmark],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
     }
 }
 
